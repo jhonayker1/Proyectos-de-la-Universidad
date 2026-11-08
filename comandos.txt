@@ -1,0 +1,12 @@
+comandos por si se me olvidan xd
+
+    se deve usar en la terminal git bash
+
+Preparar los camvios de proyecto a git
+git add .      
+
+comfirmacion de cambios mas descripcion de los cambios
+git commit -m "descripcion de camvios"
+
+enviar cambios a github
+git push
