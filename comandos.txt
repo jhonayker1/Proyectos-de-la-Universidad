@@ -10,3 +10,6 @@ git commit -m "descripcion de camvios"
 
 enviar cambios a github
 git push
+
+actualizar/fucionar proyecto actual
+git pull origin main
