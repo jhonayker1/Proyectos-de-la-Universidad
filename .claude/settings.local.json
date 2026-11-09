@@ -1,0 +1,12 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(.\\\\.venv\\\\Scripts\\\\python.exe -m pytest -q)",
+      "PowerShell(.\\\\.venv\\\\Scripts\\\\python.exe -c \"import logging; logging.basicConfig\\(level=logging.INFO\\); from app.core.config import settings; from app.database.session import engine, check_database_connection; print\\(engine.url.render_as_string\\(hide_password=True\\), engine.pool.size\\(\\)\\); check_database_connection\\(\\)\")",
+      "PowerShell(Get-Command python, py -ErrorAction SilentlyContinue)",
+      "PowerShell(.\\\\.venv\\\\Scripts\\\\python.exe -m pytest -q -p no:cacheprovider 2>&1)",
+      "PowerShell($s=\"C:\\\\Users\\\\DAVIDG~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-DAVID-GAMBOA-Desktop-representaciones-july-rey\\\\3044c7fd-9a8e-4c15-94dd-ff4ab6eb7022\\\\scratchpad\"; $env:Path = [Environment]::GetEnvironmentVariable\\('Path','Machine'\\) + ';' + [Environment]::GetEnvironmentVariable\\('Path','User'\\); Set-Location \"$s\\\\e2e\"; node e2e.mjs \"$s\\\\shots\" 2>&1 | ForEach-Object { \"$_\" })",
+      "PowerShell($env:Path = [Environment]::GetEnvironmentVariable\\('Path','Machine'\\) + ';' + [Environment]::GetEnvironmentVariable\\('Path','User'\\); Set-Location \"C:\\\\Users\\\\DAVID GAMBOA\\\\Desktop\\\\representaciones-july-rey\\\\frontend\"; npm run build 2>&1 | Select-String \"error|Catalogo|built in\")"
+    ]
+  }
+}
