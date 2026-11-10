@@ -67,6 +67,8 @@ export const proveedoresApi = {
   list: () => api.get<Proveedor[]>('/proveedores/'),
   create: (data: Partial<Proveedor>) => api.post<Proveedor>('/proveedores/', data),
   update: (id: number, data: Partial<Proveedor>) => api.put<Proveedor>(`/proveedores/${id}`, data),
+  /** Baja lógica; el backend responde 409 si tiene compras pendientes de pago. */
+  remove: (id: number) => api.delete(`/proveedores/${id}`),
 }
 
 export const productosApi = {

@@ -73,10 +73,10 @@ puede entrar, también puede definir `INITIAL_ADMIN_*` para crear un administrad
 |---|---|---|
 | Admin | Inicio | `GET /reportes/dashboard`, `/reportes/top-productos`, `/reportes/stock-por-categoria` |
 | Admin | Usuarios | `GET/POST /usuarios`, `PUT /usuarios/{id}`, `PATCH /usuarios/{id}/estado`, `PATCH /usuarios/{id}/password`, `DELETE /usuarios/{id}` (solo sin historial); tasas `GET /tasas/vigente`, `POST /tasas`; márgenes `GET/PUT /categorias` |
-| Admin | Inventario | `GET /productos/admin`, `POST/PUT/DELETE /productos`, `/categorias`, `/marcas`, `/proveedores` |
-| Admin | Catálogo | `GET /categorias?incluir_inactivos=true`, `POST/PUT/DELETE /categorias` (con margen de ganancia), lo mismo para `/marcas`; desactivar es baja lógica (`estado = 0`) y se puede reactivar |
+| Admin | Inventario | `GET /productos/admin` (sin los eliminados; `?incluir_eliminados=true` para verlos), `POST/PUT /productos`, `DELETE /productos/{id}`: elimina el producto de la lista; si no tiene ventas ni compras se borra de la base, y si tiene historial se oculta (estado `Inactivo`) para conservar facturas y reportes y su SKU queda libre (`SKU~id`). También usa `/categorias`, `/marcas`, `/proveedores` |
+| Admin | Catálogo | `GET /categorias?incluir_inactivos=true`, `POST/PUT/DELETE /categorias` (con margen de ganancia), lo mismo para `/marcas`; desactivar es baja lógica (`estado = 0`) y se puede reactivar. Una categoría con productos activos con stock no se puede desactivar (409, por `DELETE` o `PUT` con `estado = 0`) |
 | Admin | Reportes | `/reportes/serie-ventas`, `/reportes/top-productos`, `/reportes/movimientos-stock`, `/reportes/ventas-por-categoria`, `/compras/entradas-recientes`, `/productos/stock-bajo`, `GET /ventas?dia=` y `?desde&hasta`, `POST /ventas/{id}/anular`, `/facturas` |
-| Admin | Proveedores | `GET/POST/PUT /proveedores`, `GET/POST /compras`, `PATCH /compras/{id}/pagado` |
+| Admin | Proveedores | `GET/POST/PUT /proveedores` (RIF, teléfono y correo obligatorios; el RIF debe empezar con V, E, J, P, G o C y se guarda como `J-12345678-9`), `DELETE /proveedores/{id}` (baja lógica; 409 si tiene compras pendientes de pago), `GET/POST /compras`, `PATCH /compras/{id}/pagado` |
 | Cajero | Punto de venta | `GET /ventas/mi-resumen`, `GET /tasas/vigente`, `GET /monedas`, `POST /ventas`, `GET /ventas?dia=` |
 | Cajero | Inventario | `GET /productos` (solo lectura; agregar al ticket) |
 | Cajero | Mis ventas | `GET /ventas?dia=` y `?desde&hasta` (el backend solo devuelve las propias) |

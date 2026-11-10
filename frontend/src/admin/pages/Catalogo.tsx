@@ -1,26 +1,57 @@
 /** Categorías y marcas: alta, edición y baja lógica (estado = 0) con reactivación. */
 import React from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Pencil, Plus, Power, Search } from 'lucide-react'
+import { AlertTriangle, Pencil, Plus, Power, Search } from 'lucide-react'
 import { categoriasApi, marcasApi } from '@/api/endpoints'
 import { keys, useApiMutation, useProductosAdmin } from '@/api/queries'
-import type { Categoria, Marca } from '@/api/types'
+import type { Categoria, Marca, ProductoAdmin } from '@/api/types'
 import { Badge, ConfirmDialog, EmptyState, ErrorBanner, Field, Modal, Spinner, cx, errorText, useToast } from '@/shared/components/ui'
 import { num, parseDecimal } from '@/shared/lib/money'
 
-/** Cuántos productos activos usan cada categoría / marca. */
+/** Cuántos productos activos usan cada categoría / marca, y cuáles tienen stock por categoría. */
 function useConteos() {
   const productos = useProductosAdmin()
   return React.useMemo(() => {
     const cat = new Map<number, number>()
     const marca = new Map<number, number>()
+    const stockCat = new Map<number, ProductoAdmin[]>()
     for (const p of productos.data ?? []) {
       if (p.estado === 'Inactivo') continue
       cat.set(p.id_categoria, (cat.get(p.id_categoria) ?? 0) + 1)
       if (p.id_marca !== null) marca.set(p.id_marca, (marca.get(p.id_marca) ?? 0) + 1)
+      if (p.stock_actual > 0) stockCat.set(p.id_categoria, [...(stockCat.get(p.id_categoria) ?? []), p])
     }
-    return { cat, marca }
+    for (const lista of stockCat.values()) lista.sort((a, b) => b.stock_actual - a.stock_actual)
+    return { cat, marca, stockCat }
   }, [productos.data])
+}
+
+/** Aviso cuando se intenta desactivar una categoría que todavía tiene productos con stock. */
+function CategoriaConStock({ categoria, productos, onClose }: { categoria: Categoria; productos: ProductoAdmin[]; onClose: () => void }) {
+  const unidades = productos.reduce((t, p) => t + p.stock_actual, 0)
+  const visibles = productos.slice(0, 8)
+  return (
+    <Modal title="No se puede desactivar esta categoría" onClose={onClose} footer={<button className="btn-primary" onClick={onClose}>Entendido</button>}>
+      <div className="flex gap-3 rounded-xl border border-warning/40 bg-warning/10 p-3.5 text-[13px]">
+        <AlertTriangle size={20} className="mt-0.5 shrink-0 text-warning" />
+        <div>
+          <b>{categoria.nombre}</b> tiene <b>{productos.length} producto(s) con stock</b> ({unidades} unidades en total).
+          Venda ese stock o cambie esos productos de categoría (en Inventario) antes de desactivarla.
+        </div>
+      </div>
+      <div className="mt-3.5 overflow-hidden rounded-xl border border-border">
+        {visibles.map((p, i) => (
+          <div key={p.id_producto} className={cx('flex items-center gap-2.5 px-3 py-2 text-xs', i > 0 && 'border-t border-border')}>
+            <span className="min-w-0 flex-1 truncate"><b>{p.sku}</b> · {p.nombre}</span>
+            <span className="font-display font-bold">{p.stock_actual} uds.</span>
+          </div>
+        ))}
+        {productos.length > visibles.length && (
+          <div className="border-t border-border px-3 py-2 text-xs text-muted-foreground">y {productos.length - visibles.length} producto(s) más…</div>
+        )}
+      </div>
+    </Modal>
+  )
 }
 
 /** Marco común de cada panel: título, buscador, botón "Nueva" y lista. */
@@ -46,9 +77,9 @@ function Panel({ titulo, subtitulo, buscar, setBuscar, onNuevo, nuevoLabel, chil
   )
 }
 
-function Fila({ nombre, detalle, extra, activo, productos, onEditar, onToggle }: {
+function Fila({ nombre, detalle, extra, activo, productos, unidades, onEditar, onToggle }: {
   nombre: string; detalle?: string | null; extra?: React.ReactNode; activo: boolean
-  productos: number; onEditar: () => void; onToggle: () => void
+  productos: number; unidades?: number; onEditar: () => void; onToggle: () => void
 }) {
   return (
     <div className={cx('flex items-center gap-3 border-b border-border px-[18px] py-3', !activo && 'opacity-55')}>
@@ -60,7 +91,9 @@ function Fila({ nombre, detalle, extra, activo, productos, onEditar, onToggle }:
         {detalle && <div className="mt-0.5 truncate text-xs text-muted-foreground">{detalle}</div>}
       </div>
       {extra}
-      <span className="w-20 text-right text-xs text-muted-foreground">{productos} prod.</span>
+      <span className={cx('text-right text-xs text-muted-foreground', unidades === undefined ? 'w-20' : 'w-32')}>
+        {productos} prod.{unidades !== undefined && <> · <span className={unidades > 0 ? 'font-semibold text-foreground' : undefined}>{unidades} uds.</span></>}
+      </span>
       <button aria-label={`Editar ${nombre}`} className="btn-icon text-primary" onClick={onEditar}><Pencil size={13} /></button>
       <button aria-label={`${activo ? 'Desactivar' : 'Reactivar'} ${nombre}`} title={activo ? 'Desactivar' : 'Reactivar'}
         className={cx('btn-icon', activo ? 'text-danger' : 'text-success')} onClick={onToggle}>
@@ -142,6 +175,7 @@ export default function Catalogo() {
   const [editCat, setEditCat] = React.useState<{ c: Categoria | null } | null>(null)
   const [editMarca, setEditMarca] = React.useState<{ m: Marca | null } | null>(null)
   const [baja, setBaja] = React.useState<Baja | null>(null)
+  const [conStock, setConStock] = React.useState<Categoria | null>(null)
 
   const desactivar = useApiMutation((b: Baja) => b.tipo === 'categoria' ? categoriasApi.remove(b.item.id_categoria) : marcasApi.remove(b.item.id_marca),
     [keys.categorias, keys.marcas], () => { toast('Desactivada. Ya no aparece al crear productos ni en los filtros.'); setBaja(null) })
@@ -152,6 +186,10 @@ export default function Catalogo() {
   const cats = (categorias.data ?? []).filter(c => coincide(buscarCat, c.nombre, c.descripcion))
   const mars = (marcas.data ?? []).filter(m => coincide(buscarMarca, m.nombre, m.pais_origen))
   const productosDe = (b: Baja) => b.tipo === 'categoria' ? conteos.cat.get(b.item.id_categoria) ?? 0 : conteos.marca.get(b.item.id_marca) ?? 0
+  const stockDe = (c: Categoria) => conteos.stockCat.get(c.id_categoria) ?? []
+  const unidadesDe = (c: Categoria) => stockDe(c).reduce((t, p) => t + p.stock_actual, 0)
+  // Una categoría con productos en stock no se desactiva: se muestra el aviso (el backend también lo impide).
+  const desactivarCategoria = (c: Categoria) => stockDe(c).length > 0 ? setConStock(c) : setBaja({ tipo: 'categoria', item: c })
 
   return (
     <div className="grid grid-cols-1 gap-4 pb-6 xl:grid-cols-2">
@@ -160,12 +198,12 @@ export default function Catalogo() {
         {categorias.isLoading ? <Spinner /> : categorias.error ? <div className="p-4"><ErrorBanner error={categorias.error} onRetry={() => categorias.refetch()} /></div> :
           cats.length === 0 ? <EmptyState title="No hay categorías con ese criterio." /> : cats.map(c => (
             <Fila key={c.id_categoria} nombre={c.nombre} detalle={c.descripcion} activo={c.estado === 1}
-              productos={conteos.cat.get(c.id_categoria) ?? 0}
+              productos={conteos.cat.get(c.id_categoria) ?? 0} unidades={unidadesDe(c)}
               extra={<span className="w-20 text-right font-display text-sm font-bold text-primary" title="Margen de ganancia">
                 {num(c.margen_ganancia) === 0 ? 'Manual' : `${num(c.margen_ganancia)}%`}
               </span>}
               onEditar={() => setEditCat({ c })}
-              onToggle={() => c.estado === 1 ? setBaja({ tipo: 'categoria', item: c }) : reactivarCat.mutate(c, onError)} />
+              onToggle={() => c.estado === 1 ? desactivarCategoria(c) : reactivarCat.mutate(c, onError)} />
           ))}
       </Panel>
 
@@ -182,12 +220,15 @@ export default function Catalogo() {
 
       {editCat && <CategoriaModal categoria={editCat.c} onClose={() => setEditCat(null)} />}
       {editMarca && <MarcaModal marca={editMarca.m} onClose={() => setEditMarca(null)} />}
+      {conStock && <CategoriaConStock categoria={conStock} productos={stockDe(conStock)} onClose={() => setConStock(null)} />}
       {baja && (
         <ConfirmDialog danger title={`Desactivar ${baja.tipo === 'categoria' ? 'categoría' : 'marca'}`} confirmText="Desactivar" busy={desactivar.isPending}
           message={<>
             ¿Desactivar <b>{baja.item.nombre}</b>? Dejará de aparecer al crear productos y en los filtros. Se puede reactivar luego.
             {productosDe(baja) > 0 && <div className="mt-2 font-semibold text-warning">
-              {productosDe(baja)} producto(s) la usan; seguirán a la venta con esta {baja.tipo === 'categoria' ? 'categoría' : 'marca'}.
+              {baja.tipo === 'categoria'
+                ? `${productosDe(baja)} producto(s) sin stock la usan; conservarán esta categoría.`
+                : `${productosDe(baja)} producto(s) la usan; seguirán a la venta con esta marca.`}
             </div>}
             {desactivar.error && <div className="mt-3"><ErrorBanner error={desactivar.error} /></div>}
           </>}

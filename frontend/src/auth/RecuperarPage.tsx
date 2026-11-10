@@ -7,7 +7,7 @@ import { Link, useNavigate } from 'react-router-dom'
 import { ArrowLeft, KeyRound, Terminal } from 'lucide-react'
 import logoImg from '@/assets/logo.jpeg'
 import { authApi } from '@/api/endpoints'
-import { errorText } from '@/shared/components/ui'
+import { errorText, PasswordInput } from '@/shared/components/ui'
 
 export default function RecuperarPage() {
   const navigate = useNavigate()
@@ -92,11 +92,11 @@ export default function RecuperarPage() {
             </label>
             <label className="mb-3.5 block">
               <span className="label">Nueva contraseña</span>
-              <input className="input" type="password" autoComplete="new-password" required placeholder="Mínimo 8 caracteres" value={password} onChange={e => setPassword(e.target.value)} />
+              <PasswordInput autoComplete="new-password" required placeholder="Mínimo 8 caracteres" value={password} onChange={e => setPassword(e.target.value)} />
             </label>
             <label className="mb-5 block">
               <span className="label">Repita la contraseña</span>
-              <input className="input" type="password" autoComplete="new-password" required value={password2} onChange={e => setPassword2(e.target.value)} />
+              <PasswordInput autoComplete="new-password" required value={password2} onChange={e => setPassword2(e.target.value)} />
             </label>
             {error && <div role="alert" className="mb-4 rounded-lg bg-danger/10 px-3 py-2 text-xs font-semibold text-danger">{error}</div>}
             <button type="submit" className="btn-primary w-full !py-2.5" disabled={busy || codigo.length !== 6}>

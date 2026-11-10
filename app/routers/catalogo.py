@@ -4,12 +4,15 @@ from collections.abc import Callable
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import require_roles
+from app.core.money import round_money
 from app.database.session import get_db
-from app.models.inventario import Categoria, Marca, Proveedor
+from app.models.compras import Compra
+from app.models.inventario import PRODUCTO_INACTIVO, Categoria, Marca, Producto, Proveedor
 from app.models.usuarios import Usuario
 from app.schemas.catalogo import (
     CategoriaCreate,
@@ -35,6 +38,7 @@ def build_catalog_router(
     label: str,
     required_on_update: frozenset[str] = frozenset({"nombre", "estado"}),
     after_update: Callable[[Session, object, dict], None] | None = None,
+    before_delete: Callable[[Session, object], None] | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix=prefix, tags=["catalogo"])
     pk = getattr(model, pk_name)
@@ -91,7 +95,12 @@ def build_catalog_router(
                 raise HTTPException(status_code=422, detail=f"{field} no puede ser null.")
             setattr(item, field, value.strip() if field == "nombre" else value)
         if after_update is not None:
-            after_update(db, item, values)
+            try:
+                after_update(db, item, values)
+            except HTTPException:
+                # Una validación rechazó el cambio: se descarta lo asignado arriba.
+                db.rollback()
+                raise
         commit_or_conflict(db)
         db.refresh(item)
         return item
@@ -102,14 +111,45 @@ def build_catalog_router(
         db: Session = Depends(get_db),
         _: Usuario = Depends(require_roles(["admin"])),
     ) -> None:
-        get_or_404(db, item_id).estado = 0
+        item = get_or_404(db, item_id)
+        if before_delete is not None:
+            before_delete(db, item)
+        item.estado = 0
         db.commit()
 
     return router
 
 
-def reprice_category_products(db: Session, categoria: Categoria, values: dict) -> None:
-    """Al cambiar el margen de la categoría, recalcula los productos sin margen propio."""
+def ensure_category_without_stock(db: Session, categoria: Categoria) -> None:
+    """No se desactiva una categoría mientras tenga productos activos con stock."""
+    con_stock = (
+        db.query(Producto)
+        .filter(
+            Producto.id_categoria == categoria.id_categoria,
+            Producto.estado != PRODUCTO_INACTIVO,
+            Producto.stock_actual > 0,
+        )
+        .order_by(Producto.stock_actual.desc())
+        .all()
+    )
+    if con_stock:
+        unidades = sum(p.stock_actual for p in con_stock)
+        ejemplos = ", ".join(p.nombre for p in con_stock[:3])
+        resto = f" y {len(con_stock) - 3} más" if len(con_stock) > 3 else ""
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"No se puede desactivar {categoria.nombre}: tiene {len(con_stock)} producto(s) "
+                f"con stock ({unidades} unidades): {ejemplos}{resto}. Venda ese stock o cambie "
+                "esos productos de categoría antes de desactivarla."
+            ),
+        )
+
+
+def on_category_update(db: Session, categoria: Categoria, values: dict) -> None:
+    """Desactivar por PUT (estado = 0) exige lo mismo que por DELETE; el margen recalcula precios."""
+    if values.get("estado") == 0:
+        ensure_category_without_stock(db, categoria)
     if "margen_ganancia" in values:
         reprice_category(db, categoria)
 
@@ -118,12 +158,35 @@ categorias_router = build_catalog_router(
     "/categorias", Categoria, "id_categoria",
     CategoriaCreate, CategoriaUpdate, CategoriaRead, "Categoría",
     required_on_update=frozenset({"nombre", "estado", "margen_ganancia"}),
-    after_update=reprice_category_products,
+    after_update=on_category_update,
+    before_delete=ensure_category_without_stock,
 )
 marcas_router = build_catalog_router(
     "/marcas", Marca, "id_marca", MarcaCreate, MarcaUpdate, MarcaRead, "Marca"
 )
+
+
+def ensure_no_pending_purchases(db: Session, proveedor: Proveedor) -> None:
+    """No se elimina un proveedor al que se le deben compras."""
+    count, total = (
+        db.query(func.count(Compra.id_compra), func.coalesce(func.sum(Compra.monto_usd), 0))
+        .filter(Compra.id_proveedor == proveedor.id_proveedor, Compra.pagado == 0)
+        .one()
+    )
+    if count:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"No se puede eliminar {proveedor.nombre}: tiene {count} compra(s) pendiente(s) "
+                f"de pago por ${round_money(total):,.2f}. Márquelas como pagadas antes de eliminarlo."
+            ),
+        )
+
+
 proveedores_router = build_catalog_router(
     "/proveedores", Proveedor, "id_proveedor",
     ProveedorCreate, ProveedorUpdate, ProveedorRead, "Proveedor",
+    # RIF, teléfono y correo son obligatorios: al editar no se pueden borrar (null).
+    required_on_update=frozenset({"nombre", "estado", "rif", "telefono", "correo"}),
+    before_delete=ensure_no_pending_purchases,
 )

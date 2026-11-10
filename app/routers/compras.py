@@ -121,8 +121,9 @@ def create_purchase(
     admin: Usuario = Depends(require_roles(["admin"])),
 ) -> CompraRead:
     """Registra la compra y, en la misma transacción, suma el stock de cada producto."""
-    if db.get(Proveedor, compra_in.id_proveedor) is None:
-        raise HTTPException(status_code=404, detail="Proveedor no encontrado.")
+    proveedor = db.get(Proveedor, compra_in.id_proveedor)
+    if proveedor is None or proveedor.estado != 1:
+        raise HTTPException(status_code=404, detail="Proveedor no encontrado o eliminado.")
 
     requested: dict[int, int] = defaultdict(int)
     for item in compra_in.detalles:

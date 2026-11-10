@@ -1,6 +1,6 @@
 /** Componentes básicos reutilizados por los paneles de admin y cajero. */
 import React from 'react'
-import { AlertTriangle, ChevronDown, Loader2, TrendingDown, TrendingUp, X } from 'lucide-react'
+import { AlertTriangle, ChevronDown, Eye, EyeOff, Loader2, TrendingDown, TrendingUp, X } from 'lucide-react'
 import { ApiError } from '@/api/client'
 
 export const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(' ')
@@ -99,6 +99,24 @@ export function ConfirmDialog({ title, message, confirmText = 'Confirmar', dange
     </>}>
       <div className="text-[13px] text-muted-foreground">{message}</div>
     </Modal>
+  )
+}
+
+/** Campo de contraseña con botón de ojo para mostrar u ocultar lo que se escribe. */
+export function PasswordInput({ className, ...props }: Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type'>) {
+  const [visible, setVisible] = React.useState(false)
+  return (
+    <div className="relative">
+      <input {...props} type={visible ? 'text' : 'password'} className={cx('input !pr-10', className)}
+        autoCapitalize="none" autoCorrect="off" spellCheck={false} />
+      <button type="button" aria-label={visible ? 'Ocultar contraseña' : 'Mostrar contraseña'} aria-pressed={visible}
+        title={visible ? 'Ocultar contraseña' : 'Mostrar contraseña'}
+        // Evita que el clic le quite el foco al campo: se sigue escribiendo sin volver a hacer clic.
+        onMouseDown={e => e.preventDefault()} onClick={() => setVisible(v => !v)}
+        className="absolute top-1/2 right-1.5 flex h-7 w-7 -translate-y-1/2 cursor-pointer items-center justify-center rounded-md border-none bg-transparent text-muted-foreground hover:bg-border hover:text-foreground">
+        {visible ? <EyeOff size={16} /> : <Eye size={16} />}
+      </button>
+    </div>
   )
 }
 

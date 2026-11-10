@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.dependencies import require_roles
 from app.core.money import to_local
 from app.database.session import get_db
+from app.models.compras import DetalleCompra
 from app.models.inventario import (
     PRODUCTO_DISPONIBLE,
     PRODUCTO_INACTIVO,
@@ -17,6 +18,7 @@ from app.models.inventario import (
     Proveedor,
 )
 from app.models.usuarios import Usuario
+from app.models.ventas import DetalleVenta
 from app.schemas.productos import (
     ProductoAdminRead,
     ProductoCreate,
@@ -90,12 +92,15 @@ def list_products(
 
 @router.get("/admin", response_model=list[ProductoAdminRead])
 def list_products_admin(
+    incluir_eliminados: bool = Query(default=False),
     db: Session = Depends(get_db),
     _: Usuario = Depends(require_roles(["admin"])),
 ) -> list[ProductoRead]:
     rate = local_rate_value(db)
-    productos = db.query(Producto).order_by(Producto.nombre).all()
-    return [to_read(ProductoAdminRead, p, rate) for p in productos]
+    query = db.query(Producto)
+    if not incluir_eliminados:
+        query = query.filter(Producto.estado != PRODUCTO_INACTIVO)
+    return [to_read(ProductoAdminRead, p, rate) for p in query.order_by(Producto.nombre).all()]
 
 
 @router.get("/stock-bajo", response_model=list[ProductoAdminRead])
@@ -174,10 +179,24 @@ def update_product(
 
 
 @router.delete("/{id_producto}", status_code=status.HTTP_204_NO_CONTENT)
-def deactivate_product(
+def delete_product(
     id_producto: int,
     db: Session = Depends(get_db),
     _: Usuario = Depends(require_roles(["admin"])),
 ) -> None:
-    get_or_404(db, id_producto).estado = PRODUCTO_INACTIVO
+    """Elimina el producto. Sin ventas ni compras se borra de la base; con historial se
+    oculta de todas las pantallas (estado Inactivo) para no romper facturas y reportes, y
+    se libera su SKU para poder reutilizarlo."""
+    producto = get_or_404(db, id_producto)
+    tiene_historial = any(
+        db.query(modelo).filter(modelo.id_producto == id_producto).first() is not None
+        for modelo in (DetalleVenta, DetalleCompra)
+    )
+    if tiene_historial:
+        sufijo = f"~{producto.id_producto}"
+        if producto.estado != PRODUCTO_INACTIVO:
+            producto.sku = producto.sku[: 50 - len(sufijo)] + sufijo
+        producto.estado = PRODUCTO_INACTIVO
+    else:
+        db.delete(producto)
     db.commit()

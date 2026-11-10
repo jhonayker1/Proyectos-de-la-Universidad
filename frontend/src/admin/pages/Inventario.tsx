@@ -4,7 +4,7 @@ import { productosApi } from '@/api/endpoints'
 import { keys, useApiMutation, useCategorias, useMarcas, useProductosAdmin, useProveedores } from '@/api/queries'
 import type { ProductoAdmin, ProductoInput } from '@/api/types'
 import { CurrencySelect, FiltrosBar, StockCell, emojiCategoria, useFiltrosProductos, useTasas, type MonedaVista } from '@/shared/components/productos'
-import { Badge, ConfirmDialog, EmptyState, ErrorBanner, Field, Modal, Pagination, Spinner, errorText, useToast } from '@/shared/components/ui'
+import { Badge, ConfirmDialog, EmptyState, ErrorBanner, Field, Modal, Pagination, Spinner, useToast } from '@/shared/components/ui'
 import { num, parseDecimal, precioConMargen, usd } from '@/shared/lib/money'
 
 type Form = {
@@ -138,12 +138,11 @@ export default function Inventario() {
   const [moneda, setMoneda] = React.useState<MonedaVista>('USD')
   const f = useFiltrosProductos(productos.data)
   const [modal, setModal] = React.useState<{ producto: ProductoAdmin | null } | null>(null)
-  const [baja, setBaja] = React.useState<ProductoAdmin | null>(null)
-  const darBaja = useApiMutation((p: ProductoAdmin) => productosApi.remove(p.id_producto), [keys.productos, keys.reportes], () => {
-    toast('Producto dado de baja.'); setBaja(null)
-  })
-  const reactivar = useApiMutation((p: ProductoAdmin) => productosApi.update(p.id_producto, { estado: 'Disponible' }),
-    [keys.productos], p => toast(`${p.nombre} reactivado.`))
+  const [eliminar, setEliminar] = React.useState<ProductoAdmin | null>(null)
+  const eliminacion = useApiMutation((p: ProductoAdmin) => productosApi.remove(p.id_producto),
+    [keys.productos, keys.reportes, keys.categorias], () => {
+      toast(`${eliminar?.nombre ?? 'Producto'} eliminado del inventario.`); setEliminar(null)
+    })
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
@@ -164,7 +163,7 @@ export default function Inventario() {
               </thead>
               <tbody>
                 {f.paginados.map((p, i) => (
-                  <tr key={p.id_producto} className={`border-b border-border hover:bg-[#f0f0ff] ${i % 2 ? 'bg-muted' : 'bg-card'} ${p.estado === 'Inactivo' ? 'opacity-55' : ''}`}>
+                  <tr key={p.id_producto} className={`border-b border-border hover:bg-[#f0f0ff] ${i % 2 ? 'bg-muted' : 'bg-card'}`}>
                     <td className="td font-medium whitespace-nowrap text-muted-foreground">{p.sku}</td>
                     <td className="td">
                       <div className="flex items-center gap-2.5">
@@ -187,11 +186,7 @@ export default function Inventario() {
                     <td className="td">
                       <div className="flex gap-1.5">
                         <button aria-label={`Editar ${p.nombre}`} className="btn-icon !h-[30px] !w-[30px] text-primary" onClick={() => setModal({ producto: p })}><Pencil size={13} /></button>
-                        {p.estado === 'Inactivo' ? (
-                          <button className="btn-muted !px-2 !py-1 text-[11px]" onClick={() => reactivar.mutate(p, { onError: e => toast(errorText(e), 'error') })}>Reactivar</button>
-                        ) : (
-                          <button aria-label={`Dar de baja ${p.nombre}`} className="btn-icon !h-[30px] !w-[30px] text-danger" onClick={() => setBaja(p)}><Trash2 size={13} /></button>
-                        )}
+                        <button aria-label={`Eliminar ${p.nombre}`} title="Eliminar producto" className="btn-icon !h-[30px] !w-[30px] text-danger" onClick={() => setEliminar(p)}><Trash2 size={13} /></button>
                       </div>
                     </td>
                   </tr>
@@ -208,11 +203,18 @@ export default function Inventario() {
       </div>
 
       {modal && <ProductoModal producto={modal.producto} onClose={() => setModal(null)} />}
-      {baja && (
-        <ConfirmDialog danger title="Dar de baja producto" confirmText="Dar de baja" busy={darBaja.isPending}
-          message={<>¿Dar de baja <b>{baja.nombre}</b> ({baja.sku})? Deja de aparecer para la venta, pero se conserva su historial. Se puede reactivar luego.
-            {darBaja.error && <div className="mt-3"><ErrorBanner error={darBaja.error} /></div>}</>}
-          onConfirm={() => darBaja.mutate(baja)} onClose={() => setBaja(null)} />
+      {eliminar && (
+        <ConfirmDialog danger title="Eliminar producto" confirmText="Eliminar" busy={eliminacion.isPending}
+          message={<>
+            ¿Eliminar <b>{eliminar.nombre}</b> ({eliminar.sku}) del inventario? Desaparecerá de la lista y ya no se podrá vender.
+            Esta acción no se puede deshacer.
+            <div className="mt-2 text-xs">Las ventas y compras ya registradas de este producto se conservan en los reportes.</div>
+            {eliminar.stock_actual > 0 && (
+              <div className="mt-2 font-semibold text-warning">Atención: todavía tiene {eliminar.stock_actual} unidad(es) en stock.</div>
+            )}
+            {eliminacion.error && <div className="mt-3"><ErrorBanner error={eliminacion.error} /></div>}
+          </>}
+          onConfirm={() => eliminacion.mutate(eliminar)} onClose={() => { setEliminar(null); eliminacion.reset() }} />
       )}
     </div>
   )

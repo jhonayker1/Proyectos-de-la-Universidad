@@ -2,7 +2,7 @@ import React from 'react'
 import { Link, Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { LogIn } from 'lucide-react'
 import logoImg from '@/assets/logo.jpeg'
-import { errorText, Spinner } from '@/shared/components/ui'
+import { errorText, PasswordInput, Spinner } from '@/shared/components/ui'
 import { homeFor, useAuth } from './AuthContext'
 
 export default function LoginPage() {
@@ -53,7 +53,7 @@ export default function LoginPage() {
         </label>
         <label className="mb-5 block">
           <span className="label">Contraseña</span>
-          <input className="input" type="password" autoComplete="current-password" required value={password} onChange={e => setPassword(e.target.value)} />
+          <PasswordInput autoComplete="current-password" required value={password} onChange={e => setPassword(e.target.value)} />
         </label>
         {error && <div role="alert" className="mb-4 rounded-lg bg-danger/10 px-3 py-2 text-xs font-semibold text-danger">{error}</div>}
         <button type="submit" className="btn-primary w-full !py-2.5" disabled={busy}>

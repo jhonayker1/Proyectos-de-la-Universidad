@@ -7,7 +7,7 @@ import { keys, useApiMutation, useCategorias } from '@/api/queries'
 import type { Usuario } from '@/api/types'
 import { useCurrentUser } from '@/auth/AuthContext'
 import { useTasas } from '@/shared/components/productos'
-import { Badge, ConfirmDialog, EmptyState, ErrorBanner, Field, Modal, QueryState, Spinner, errorText, useToast } from '@/shared/components/ui'
+import { Badge, ConfirmDialog, EmptyState, ErrorBanner, Field, Modal, PasswordInput, QueryState, Spinner, errorText, useToast } from '@/shared/components/ui'
 import { fmtHora, todayIso } from '@/shared/lib/dates'
 import { fmtTasa, num, parseDecimal, usd } from '@/shared/lib/money'
 import { pdfHistorialDia } from '@/shared/lib/pdf'
@@ -177,7 +177,7 @@ function UsuarioModal({ editar, onClose }: { editar: Usuario | null; onClose: ()
         {/* La contraseña no se muestra al editar (plans/ocultar-contrasena-al-editar-usuario.md). */}
         {!editar && (
           <Field label="Contraseña" hint="Mínimo 8 caracteres.">
-            <input className="input" type="password" autoComplete="new-password" value={form.password} onChange={set('password')} />
+            <PasswordInput autoComplete="new-password" value={form.password} onChange={set('password')} />
           </Field>
         )}
         <Field label="Teléfono"><input className="input" value={form.telefono} onChange={set('telefono')} /></Field>
@@ -214,8 +214,8 @@ function PasswordModal({ usuario, onClose }: { usuario: Usuario; onClose: () => 
       <button className="btn-primary" onClick={submit} disabled={guardar.isPending}>Actualizar contraseña</button>
     </>}>
       <div className="flex flex-col gap-3.5">
-        <Field label="Nueva contraseña"><input autoFocus className="input" type="password" autoComplete="new-password" placeholder="Mínimo 8 caracteres" value={pw} onChange={e => { setPw(e.target.value); setErr('') }} /></Field>
-        <Field label="Confirmar contraseña"><input className={`input ${err ? '!border-danger' : ''}`} type="password" autoComplete="new-password" value={pw2}
+        <Field label="Nueva contraseña"><PasswordInput autoFocus autoComplete="new-password" placeholder="Mínimo 8 caracteres" value={pw} onChange={e => { setPw(e.target.value); setErr('') }} /></Field>
+        <Field label="Confirmar contraseña"><PasswordInput className={err ? '!border-danger' : undefined} autoComplete="new-password" value={pw2}
           onChange={e => { setPw2(e.target.value); setErr('') }} onKeyDown={e => { if (e.key === 'Enter') submit() }} /></Field>
         {err && <p className="m-0 text-[11px] text-danger">{err}</p>}
       </div>

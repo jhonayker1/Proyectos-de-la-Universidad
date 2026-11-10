@@ -1,3 +1,5 @@
+import pytest
+
 from app.core.config import settings
 from app.models import Categoria, Producto, Proveedor, Usuario
 from tests.conftest import PASSWORD, add_admin, add_cashier, add_product, auth_header
@@ -95,6 +97,95 @@ def test_purchase_adds_stock_updates_cost_and_debt(client, db_session):
     ).status_code == 422
 
 
+def test_delete_product_without_history_removes_it(client, db_session):
+    add_admin(db_session)
+    admin = auth_header(client, "admin@test.com")
+    p = add_product(db_session, "BORRAR-1", stock=3)
+
+    assert client.delete(f"/productos/{p.id_producto}", headers=admin).status_code == 204
+
+    db_session.expire_all()
+    assert db_session.get(Producto, p.id_producto) is None
+    assert client.get("/productos/admin", headers=admin).json() == []
+
+
+def test_delete_product_with_sales_hides_it_and_keeps_history(client, db_session):
+    add_admin(db_session)
+    admin = auth_header(client, "admin@test.com")
+    p = add_product(db_session, "HIST-1", stock=5, precio_usd="10.00")
+    venta = client.post("/ventas/", headers=admin, json={
+        "codigo_moneda_pago": "USD", "detalles": [{"id_producto": p.id_producto, "cantidad": 2}]}).json()
+
+    assert client.delete(f"/productos/{p.id_producto}", headers=admin).status_code == 204
+
+    # Desaparece de todas las listas…
+    assert client.get("/productos/admin", headers=admin).json() == []
+    assert client.get("/productos/", headers=admin).json() == []
+    assert client.get(f"/productos/{p.id_producto}", headers=admin).status_code == 404
+    # …pero la venta conserva su detalle.
+    detalle = client.get(f"/ventas/{venta['id_venta']}", headers=admin).json()["detalles"][0]
+    assert detalle["nombre_producto_snapshot"] == "Producto HIST-1"
+    # El SKU queda libre para un producto nuevo.
+    nuevo = client.post("/productos/", headers=admin, json={
+        "sku": "HIST-1", "nombre": "Reemplazo", "id_categoria": 1, "precio_usd": "12.00"})
+    assert nuevo.status_code == 201, nuevo.text
+    ocultos = client.get("/productos/admin?incluir_eliminados=true", headers=admin).json()
+    assert {x["sku"] for x in ocultos} == {"HIST-1", f"HIST-1~{p.id_producto}"}
+
+
+def test_category_with_stock_cannot_be_deactivated(client, db_session):
+    add_admin(db_session)
+    admin = auth_header(client, "admin@test.com")
+    con_stock = add_product(db_session, "STK-1", stock=4)
+    add_product(db_session, "STK-2", stock=0)  # sin stock: no impide
+
+    por_delete = client.delete("/categorias/1", headers=admin)
+    assert por_delete.status_code == 409
+    assert "1 producto(s) con stock (4 unidades)" in por_delete.json()["detail"]
+    assert "Producto STK-1" in por_delete.json()["detail"]
+    # Desactivar editando el estado tampoco se permite.
+    assert client.put("/categorias/1", headers=admin, json={"estado": 0}).status_code == 409
+    assert db_session.get(Categoria, 1).estado == 1
+
+    # Un producto dado de baja (Inactivo) no cuenta aunque tenga stock.
+    client.delete(f"/productos/{con_stock.id_producto}", headers=admin)
+    assert client.delete("/categorias/1", headers=admin).status_code == 204
+    db_session.expire_all()
+    assert db_session.get(Categoria, 1).estado == 0
+    # Reactivar sigue permitido.
+    assert client.put("/categorias/1", headers=admin, json={"estado": 1}).status_code == 200
+
+
+def test_category_deactivation_allowed_when_stock_is_zero(client, db_session):
+    add_admin(db_session)
+    admin = auth_header(client, "admin@test.com")
+    add_product(db_session, "CERO-1", stock=0)
+
+    assert client.put("/categorias/1", headers=admin, json={"estado": 0}).status_code == 200
+
+
+def test_supplier_with_pending_purchases_cannot_be_deleted(client, db_session):
+    add_admin(db_session)
+    admin = auth_header(client, "admin@test.com")
+    db_session.add(Proveedor(nombre="Dist. Goodyear", estado=1))
+    db_session.commit()
+    compra = client.post("/compras/", headers=admin, json={"id_proveedor": 1, "monto_usd": "1250.50"}).json()
+
+    bloqueado = client.delete("/proveedores/1", headers=admin)
+    assert bloqueado.status_code == 409
+    assert "1 compra(s) pendiente(s)" in bloqueado.json()["detail"]
+    assert "$1,250.50" in bloqueado.json()["detail"]
+    assert [p["nombre"] for p in client.get("/proveedores/", headers=admin).json()] == ["Dist. Goodyear"]
+
+    client.patch(f"/compras/{compra['id_compra']}/pagado", headers=admin, json={"pagado": True})
+    assert client.delete("/proveedores/1", headers=admin).status_code == 204
+    # Sale de la lista activa, pero su historial de compras se conserva.
+    assert client.get("/proveedores/", headers=admin).json() == []
+    assert len(client.get("/compras/?id_proveedor=1", headers=admin).json()) == 1
+    # A un proveedor eliminado ya no se le registran compras.
+    assert client.post("/compras/", headers=admin, json={"id_proveedor": 1, "monto_usd": "10"}).status_code == 404
+
+
 def test_supplier_extended_fields(client, db_session):
     add_admin(db_session)
     admin = auth_header(client, "admin@test.com")
@@ -103,14 +194,71 @@ def test_supplier_extended_fields(client, db_session):
         "/proveedores/",
         headers=admin,
         json={"nombre": "Bosch Occidente", "rif": "J-31002244-5", "contacto": "Luis",
-              "correo": "comercial@bosch.example", "ciudad": "Maracaibo",
-              "condiciones": "Crédito a 15 días"},
+              "telefono": "+58 261 555 0123", "correo": "comercial@bosch.example",
+              "ciudad": "Maracaibo", "condiciones": "Crédito a 15 días"},
     )
     assert creado.status_code == 201, creado.text
     assert creado.json()["ciudad"] == "Maracaibo"
     assert client.post(
-        "/proveedores/", headers=admin, json={"nombre": "X", "correo": "no-es-correo"}
+        "/proveedores/", headers=admin,
+        json={"nombre": "X", "rif": "J-1234567", "telefono": "04141234567", "correo": "no-es-correo"},
     ).status_code == 422
+
+
+VALIDO = {"nombre": "Prov", "rif": "J-30123456-7", "telefono": "0414-555-0141", "correo": "v@prov.example"}
+
+
+@pytest.mark.parametrize("rif, esperado", [
+    ("J-30123456-7", "J-30123456-7"),
+    ("j301234567", "J-30123456-7"),      # minúscula y sin guiones: se normaliza
+    (" v 12345678 ", "V-12345678"),
+    ("G-20000001-0", "G-20000001-0"),
+])
+def test_supplier_rif_is_normalized(client, db_session, rif, esperado):
+    add_admin(db_session)
+    r = client.post("/proveedores/", headers=auth_header(client, "admin@test.com"), json={**VALIDO, "rif": rif})
+    assert r.status_code == 201, r.text
+    assert r.json()["rif"] == esperado
+
+
+@pytest.mark.parametrize("cambio, mensaje", [
+    ({"rif": "30123456-7"}, "debe comenzar con una letra"),
+    ({"rif": "X-30123456-7"}, "RIF inválido"),
+    ({"rif": "J-ABC"}, "RIF inválido"),
+    ({"rif": "  "}, "El RIF es obligatorio"),
+    ({"telefono": ""}, "El teléfono es obligatorio"),
+    ({"telefono": "abc-1234"}, "solo puede tener números"),
+    ({"telefono": "123"}, "entre 7 y 15 dígitos"),
+    ({"correo": ""}, "correo"),
+])
+def test_supplier_create_rejects_invalid_data(client, db_session, cambio, mensaje):
+    add_admin(db_session)
+    r = client.post("/proveedores/", headers=auth_header(client, "admin@test.com"), json={**VALIDO, **cambio})
+    assert r.status_code == 422
+    assert mensaje in str(r.json()["detail"])
+
+
+@pytest.mark.parametrize("faltante", ["rif", "telefono", "correo"])
+def test_supplier_create_requires_rif_phone_and_email(client, db_session, faltante):
+    add_admin(db_session)
+    datos = {k: v for k, v in VALIDO.items() if k != faltante}
+    r = client.post("/proveedores/", headers=auth_header(client, "admin@test.com"), json=datos)
+    assert r.status_code == 422
+
+
+def test_supplier_edit_cannot_clear_or_break_required_fields(client, db_session):
+    add_admin(db_session)
+    admin = auth_header(client, "admin@test.com")
+    p = client.post("/proveedores/", headers=admin, json=VALIDO).json()
+    url = f"/proveedores/{p['id_proveedor']}"
+
+    for campo in ("rif", "telefono", "correo"):
+        assert client.put(url, headers=admin, json={campo: None}).status_code == 422
+    assert client.put(url, headers=admin, json={"telefono": ""}).status_code == 422
+    assert client.put(url, headers=admin, json={"rif": "12345678"}).status_code == 422
+    ok = client.put(url, headers=admin, json={"rif": "e-8123456", "ciudad": "Valencia"})
+    assert ok.status_code == 200
+    assert ok.json()["rif"] == "E-8123456"
 
 
 def test_user_edit_password_reset_and_delete(client, db_session):

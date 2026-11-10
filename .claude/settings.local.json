@@ -6,7 +6,13 @@
       "PowerShell(Get-Command python, py -ErrorAction SilentlyContinue)",
       "PowerShell(.\\\\.venv\\\\Scripts\\\\python.exe -m pytest -q -p no:cacheprovider 2>&1)",
       "PowerShell($s=\"C:\\\\Users\\\\DAVIDG~1\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-DAVID-GAMBOA-Desktop-representaciones-july-rey\\\\3044c7fd-9a8e-4c15-94dd-ff4ab6eb7022\\\\scratchpad\"; $env:Path = [Environment]::GetEnvironmentVariable\\('Path','Machine'\\) + ';' + [Environment]::GetEnvironmentVariable\\('Path','User'\\); Set-Location \"$s\\\\e2e\"; node e2e.mjs \"$s\\\\shots\" 2>&1 | ForEach-Object { \"$_\" })",
-      "PowerShell($env:Path = [Environment]::GetEnvironmentVariable\\('Path','Machine'\\) + ';' + [Environment]::GetEnvironmentVariable\\('Path','User'\\); Set-Location \"C:\\\\Users\\\\DAVID GAMBOA\\\\Desktop\\\\representaciones-july-rey\\\\frontend\"; npm run build 2>&1 | Select-String \"error|Catalogo|built in\")"
+      "PowerShell($env:Path = [Environment]::GetEnvironmentVariable\\('Path','Machine'\\) + ';' + [Environment]::GetEnvironmentVariable\\('Path','User'\\); Set-Location \"C:\\\\Users\\\\DAVID GAMBOA\\\\Desktop\\\\representaciones-july-rey\\\\frontend\"; npm run build 2>&1 | Select-String \"error|Catalogo|built in\")",
+      "PowerShell(Set-Location \"C:\\\\Users\\\\DAVID GAMBOA\\\\Desktop\\\\representaciones-july-rey\"; $pf = \\(Get-ChildItem \"$env:TEMP\\\\claude\" -Recurse -Directory -Filter pyflakes -ErrorAction SilentlyContinue | Select-Object -First 1\\).Parent.FullName; if \\($pf\\) { $env:PYTHONPATH=$pf; .\\\\.venv\\\\Scripts\\\\python.exe -m pyflakes app tests; if \\($?\\) { \"pyflakes ok\" }; Remove-Item Env:PYTHONPATH }; .\\\\.venv\\\\Scripts\\\\python.exe -m pytest -q -p no:cacheprovider 2>&1 | Select-String \"passed|failed|^E |FAILED\" | Select-Object -Last 15)",
+      "PowerShell($env:Path = [Environment]::GetEnvironmentVariable\\('Path','Machine'\\) + ';' + [Environment]::GetEnvironmentVariable\\('Path','User'\\); Set-Location \"C:\\\\Users\\\\DAVID GAMBOA\\\\Desktop\\\\representaciones-july-rey\\\\frontend\"; npm.cmd run build 2>&1 | Select-String \"error|built in\")",
+      "PowerShell(Set-Location \"c:\\\\Users\\\\DAVID GAMBOA\\\\Desktop\\\\representaciones-july-rey\"; $pf = \\(Get-ChildItem \"$env:TEMP\\\\claude\" -Recurse -Directory -Filter pyflakes -ErrorAction SilentlyContinue | Select-Object -First 1\\).Parent.FullName; if \\($pf\\) { $env:PYTHONPATH=$pf; .\\\\.venv\\\\Scripts\\\\python.exe -m pyflakes app tests; if \\($?\\) { \"pyflakes ok\" }; Remove-Item Env:PYTHONPATH }; .\\\\.venv\\\\Scripts\\\\python.exe -m pytest -q -p no:cacheprovider 2>&1 | Select-String \"passed|failed|^E |FAILED\" | Select-Object -Last 15)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\DAVID GAMBOA\\AppData\\Local\\Temp\\claude\\c--Users-DAVID-GAMBOA-Desktop-representaciones-july-rey\\3044c7fd-9a8e-4c15-94dd-ff4ab6eb7022\\scratchpad\\e2e"
     ]
   }
 }

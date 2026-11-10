@@ -1,15 +1,41 @@
 import React from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { ChevronDown, Mail, MapPin, Pencil, Phone, Plus, Search, ShoppingBag, Trash2 } from 'lucide-react'
+import { AlertTriangle, ChevronDown, Mail, MapPin, Pencil, Phone, Plus, Search, ShoppingBag, Trash2 } from 'lucide-react'
 import { comprasApi, proveedoresApi } from '@/api/endpoints'
 import { keys, useApiMutation, useProductosAdmin, useProveedores } from '@/api/queries'
 import type { Compra, Proveedor } from '@/api/types'
 import { PALETTE } from '@/shared/components/charts'
-import { Badge, EmptyState, ErrorBanner, Field, Modal, Spinner, StatBox, Tabs, cx, errorText, useToast } from '@/shared/components/ui'
+import { Badge, ConfirmDialog, EmptyState, ErrorBanner, Field, Modal, Spinner, StatBox, Tabs, cx, errorText, useToast } from '@/shared/components/ui'
 import { parseLocal, todayIso } from '@/shared/lib/dates'
 import { num, parseDecimal, round2, usd } from '@/shared/lib/money'
 
 type FormProv = { nombre: string; rif: string; contacto: string; telefono: string; correo: string; ciudad: string; condiciones: string }
+
+// Mismas reglas que app/schemas/catalogo.py (el backend vuelve a validar).
+const RIF_RE = /^([VEJPGC])[-\s]?(\d{5,9})(?:[-\s]?(\d))?$/
+
+const VALIDAR: Partial<Record<keyof FormProv, (v: string) => string | null>> = {
+  nombre: v => (v.trim() ? null : 'El nombre es obligatorio.'),
+  rif: v => {
+    const r = v.trim().toUpperCase()
+    if (!r) return 'El RIF es obligatorio.'
+    if (!/^[A-Z]/.test(r)) return 'El RIF debe comenzar con una letra (V, E, J, P, G o C).'
+    if (!RIF_RE.test(r)) return 'Use una letra V, E, J, P, G o C seguida de los números. Ej.: J-12345678-9'
+    return null
+  },
+  telefono: v => {
+    const t = v.trim()
+    if (!t) return 'El teléfono es obligatorio.'
+    if (!/^[\d\s+()\-.]+$/.test(t)) return 'Solo números, espacios, +, -, ( y ).'
+    const digitos = t.replace(/\D/g, '').length
+    return digitos < 7 || digitos > 15 ? 'Debe tener entre 7 y 15 dígitos.' : null
+  },
+  correo: v => {
+    const c = v.trim()
+    if (!c) return 'El correo es obligatorio.'
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c) ? null : 'Correo inválido. Ej.: ventas@proveedor.com'
+  },
+}
 
 function ProveedorModal({ proveedor, onClose }: { proveedor: Proveedor | null; onClose: () => void }) {
   const toast = useToast()
@@ -18,25 +44,60 @@ function ProveedorModal({ proveedor, onClose }: { proveedor: Proveedor | null; o
     telefono: proveedor?.telefono ?? '', correo: proveedor?.correo ?? '', ciudad: proveedor?.ciudad ?? '',
     condiciones: proveedor?.condiciones ?? '',
   })
-  const set = (k: keyof FormProv) => (e: React.ChangeEvent<HTMLInputElement>) => setForm(f => ({ ...f, [k]: e.target.value }))
+  // Los errores se muestran al salir del campo o al intentar guardar, no mientras se escribe.
+  const [tocados, setTocados] = React.useState<Partial<Record<keyof FormProv, boolean>>>({})
+  const [intentado, setIntentado] = React.useState(false)
+  const set = (k: keyof FormProv) => (e: React.ChangeEvent<HTMLInputElement>) =>
+    setForm(f => ({ ...f, [k]: k === 'rif' ? e.target.value.toUpperCase() : e.target.value }))
+  const errores = Object.fromEntries(
+    (Object.keys(VALIDAR) as (keyof FormProv)[]).map(k => [k, VALIDAR[k]!(form[k])]),
+  ) as Partial<Record<keyof FormProv, string | null>>
+  const hayErrores = Object.values(errores).some(Boolean)
+  const errorDe = (k: keyof FormProv) => (tocados[k] || intentado ? errores[k] ?? null : null)
+
   const guardar = useApiMutation(async () => {
     const data = Object.fromEntries(Object.entries(form).map(([k, v]) => [k, v.trim() || null])) as Partial<Proveedor>
     return proveedor ? proveedoresApi.update(proveedor.id_proveedor, data) : proveedoresApi.create(data)
   }, [keys.proveedores], p => { toast(`Proveedor ${p.nombre} guardado.`); onClose() })
-  const campos: [keyof FormProv, string, string?][] = [
-    ['rif', 'RIF', 'J-00000000-0'], ['contacto', 'Persona de contacto'], ['telefono', 'Teléfono'],
-    ['correo', 'Correo'], ['ciudad', 'Ciudad'], ['condiciones', 'Condiciones de pago', 'Crédito a 30 días'],
-  ]
+  const submit = () => {
+    setIntentado(true)
+    if (!hayErrores) guardar.mutate(undefined)
+  }
+
+  const campo = (k: keyof FormProv, label: string, opts: { placeholder?: string; type?: string; className?: string; ayuda?: string; autoFocus?: boolean } = {}) => {
+    const obligatorio = k in VALIDAR
+    const error = errorDe(k)
+    return (
+      <Field key={k} label={`${label}${obligatorio ? ' *' : ''}`} className={opts.className}
+        hint={error ? <span className="text-danger" role="alert">{error}</span> : opts.ayuda}>
+        <input className={cx('input', error && '!border-danger')} placeholder={opts.placeholder} type={opts.type ?? 'text'}
+          autoFocus={opts.autoFocus} value={form[k]} onChange={set(k)} aria-invalid={Boolean(error)}
+          onBlur={() => setTocados(t => ({ ...t, [k]: true }))} />
+      </Field>
+    )
+  }
+
   return (
     <Modal title={proveedor ? 'Editar proveedor' : 'Nuevo proveedor'} onClose={onClose} width="max-w-lg" footer={<>
       <button className="btn-muted" onClick={onClose}>Cancelar</button>
-      <button className="btn-primary" disabled={!form.nombre.trim() || guardar.isPending} onClick={() => guardar.mutate(undefined)}>Guardar</button>
+      <button className="btn-primary" disabled={guardar.isPending} onClick={submit}>
+        {guardar.isPending ? 'Guardando...' : 'Guardar'}
+      </button>
     </>}>
       <div className="grid grid-cols-2 gap-3.5">
-        <Field label="Nombre" className="col-span-2"><input className="input" autoFocus value={form.nombre} onChange={set('nombre')} /></Field>
-        {campos.map(([k, label, ph]) => (
-          <Field key={k} label={label}><input className="input" placeholder={ph} type={k === 'correo' ? 'email' : 'text'} value={form[k]} onChange={set(k)} /></Field>
-        ))}
+        {campo('nombre', 'Nombre', { className: 'col-span-2', autoFocus: true })}
+        {campo('rif', 'RIF', { placeholder: 'J-12345678-9', ayuda: 'Letra V, E, J, P, G o C y los números.' })}
+        {campo('contacto', 'Persona de contacto')}
+        {campo('telefono', 'Teléfono', { placeholder: '0414-555-0141', type: 'tel' })}
+        {campo('correo', 'Correo', { placeholder: 'ventas@proveedor.com', type: 'email' })}
+        {campo('ciudad', 'Ciudad')}
+        {campo('condiciones', 'Condiciones de pago', { placeholder: 'Crédito a 30 días' })}
+        <p className="col-span-2 m-0 text-[11px] text-muted-foreground">* Campos obligatorios.</p>
+        {intentado && hayErrores && (
+          <div className="col-span-2 rounded-lg bg-danger/10 px-3 py-2 text-xs font-semibold text-danger">
+            Revise los campos marcados en rojo antes de guardar.
+          </div>
+        )}
         {guardar.error && <div className="col-span-2"><ErrorBanner error={guardar.error} /></div>}
       </div>
     </Modal>
@@ -136,6 +197,54 @@ function HistorialCompras({ compras }: { compras: Compra[] }) {
   )
 }
 
+/**
+ * Eliminar proveedor: si tiene compras sin pagar se muestra la advertencia (y el backend
+ * también lo impide). La eliminación es lógica: el historial de compras se conserva.
+ */
+function EliminarProveedor({ proveedor, pendientes, onClose }: { proveedor: Proveedor; pendientes: Compra[]; onClose: () => void }) {
+  const toast = useToast()
+  const eliminar = useApiMutation(() => proveedoresApi.remove(proveedor.id_proveedor), [keys.proveedores, keys.compras], () => {
+    toast(`Proveedor ${proveedor.nombre} eliminado.`)
+    onClose()
+  })
+
+  if (pendientes.length > 0) {
+    const deuda = pendientes.reduce((t, c) => t + num(c.monto_usd), 0)
+    return (
+      <Modal title="No se puede eliminar este proveedor" onClose={onClose} footer={<button className="btn-primary" onClick={onClose}>Entendido</button>}>
+        <div className="flex gap-3 rounded-xl border border-warning/40 bg-warning/10 p-3.5 text-[13px]">
+          <AlertTriangle size={20} className="mt-0.5 shrink-0 text-warning" />
+          <div>
+            <b>{proveedor.nombre}</b> tiene <b>{pendientes.length} compra(s) pendiente(s) de pago</b> por <b>{usd(deuda)}</b>.
+            Márquelas como pagadas en su historial de compras antes de eliminarlo.
+          </div>
+        </div>
+        <div className="mt-3.5 overflow-hidden rounded-xl border border-border">
+          {pendientes.map((c, i) => (
+            <div key={c.id_compra} className={cx('flex items-center gap-2.5 px-3 py-2 text-xs', i > 0 && 'border-t border-border')}>
+              <span className="flex-1">
+                <b>{c.numero_factura ?? 'Sin n.º'}</b> · {parseLocal(c.fecha).toLocaleDateString('es-VE')}
+              </span>
+              <span className="font-display font-bold">{usd(c.monto_usd)}</span>
+              <Badge tone="Pendiente">Pendiente</Badge>
+            </div>
+          ))}
+        </div>
+      </Modal>
+    )
+  }
+
+  return (
+    <ConfirmDialog danger title="Eliminar proveedor" confirmText="Eliminar" busy={eliminar.isPending}
+      message={<>
+        ¿Eliminar a <b>{proveedor.nombre}</b>? Dejará de aparecer en la lista y no se le podrán registrar compras nuevas.
+        Su historial de compras y los productos que lo tienen asignado se conservan.
+        {eliminar.error && <div className="mt-3"><ErrorBanner error={eliminar.error} /></div>}
+      </>}
+      onConfirm={() => eliminar.mutate(undefined)} onClose={onClose} />
+  )
+}
+
 export default function Proveedores() {
   const proveedores = useProveedores()
   const compras = useQuery({ queryKey: keys.compras, queryFn: () => comprasApi.list({ limite: 1000 }) })
@@ -145,6 +254,7 @@ export default function Proveedores() {
   const [abierto, setAbierto] = React.useState<number | null>(null)
   const [editar, setEditar] = React.useState<{ p: Proveedor | null } | null>(null)
   const [comprar, setComprar] = React.useState<Proveedor | null>(null)
+  const [eliminar, setEliminar] = React.useState<Proveedor | null>(null)
 
   // La base no guarda categoría del proveedor: se deduce de los productos que suministra.
   const suministros = React.useMemo(() => {
@@ -195,17 +305,23 @@ export default function Proveedores() {
           const open = abierto === p.id_proveedor
           return (
             <div key={p.id_proveedor} className="card overflow-hidden !rounded-[14px]">
-              <button aria-expanded={open} onClick={() => setAbierto(open ? null : p.id_proveedor)}
-                className="flex w-full cursor-pointer flex-wrap items-center gap-3.5 border-none bg-transparent px-[18px] py-3.5 text-left">
-                <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: PALETTE[idx % PALETTE.length] }} />
-                <span className="min-w-[200px] flex-1">
-                  <span className="block font-display text-[15px] font-bold text-foreground">{p.nombre}</span>
-                  <span className="text-xs text-muted-foreground">{[p.rif, [...(s?.categorias ?? [])].join(', '), p.ciudad].filter(Boolean).join(' · ') || 'Sin datos de contacto'}</span>
-                </span>
-                <span className="text-right"><span className="block text-[11px] text-muted-foreground">Comprado</span><span className="font-display font-bold text-foreground">{usd(comprado)}</span></span>
-                <span className="min-w-[90px] text-right"><span className="block text-[11px] text-muted-foreground">Deuda</span><span className={cx('font-display font-bold', deuda > 0 ? 'text-red-600' : 'text-success')}>{usd(deuda)}</span></span>
-                <ChevronDown size={18} className={cx('text-muted-foreground transition-transform', open && 'rotate-180')} />
-              </button>
+              <div className="flex items-center">
+                <button aria-expanded={open} onClick={() => setAbierto(open ? null : p.id_proveedor)}
+                  className="flex flex-1 cursor-pointer flex-wrap items-center gap-3.5 border-none bg-transparent py-3.5 pr-2 pl-[18px] text-left">
+                  <span className="h-2.5 w-2.5 shrink-0 rounded-full" style={{ background: PALETTE[idx % PALETTE.length] }} />
+                  <span className="min-w-[200px] flex-1">
+                    <span className="block font-display text-[15px] font-bold text-foreground">{p.nombre}</span>
+                    <span className="text-xs text-muted-foreground">{[p.rif, [...(s?.categorias ?? [])].join(', '), p.ciudad].filter(Boolean).join(' · ') || 'Sin datos de contacto'}</span>
+                  </span>
+                  <span className="text-right"><span className="block text-[11px] text-muted-foreground">Comprado</span><span className="font-display font-bold text-foreground">{usd(comprado)}</span></span>
+                  <span className="min-w-[90px] text-right"><span className="block text-[11px] text-muted-foreground">Deuda</span><span className={cx('font-display font-bold', deuda > 0 ? 'text-red-600' : 'text-success')}>{usd(deuda)}</span></span>
+                  <ChevronDown size={18} className={cx('text-muted-foreground transition-transform', open && 'rotate-180')} />
+                </button>
+                <button aria-label={`Eliminar ${p.nombre}`} title="Eliminar proveedor" className="btn-icon mr-[18px] !h-8 !w-8 text-danger"
+                  onClick={() => setEliminar(p)}>
+                  <Trash2 size={14} />
+                </button>
+              </div>
               {open && (
                 <div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-5 border-t border-border p-[18px]">
                   <div className="flex flex-col gap-2 text-[13px]">
@@ -238,6 +354,10 @@ export default function Proveedores() {
 
       {editar && <ProveedorModal proveedor={editar.p} onClose={() => setEditar(null)} />}
       {comprar && <CompraModal proveedor={comprar} onClose={() => setComprar(null)} />}
+      {eliminar && (
+        <EliminarProveedor proveedor={eliminar} onClose={() => setEliminar(null)}
+          pendientes={comprasDe(eliminar.id_proveedor).filter(c => !c.pagado)} />
+      )}
     </div>
   )
 }
