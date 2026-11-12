@@ -47,6 +47,14 @@ h1, h2, h3, h4 {
   font-family: var(--font-display);
 }
 
+/* Microsoft Edge agrega su propio botón de "mostrar contraseña" (y uno de borrar) dentro
+   de los campos de contraseña. Se ocultan porque PasswordInput ya trae su propio ojo;
+   si no, se ven dos ojos al escribir. */
+input::-ms-reveal,
+input::-ms-clear {
+  display: none;
+}
+
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: #c4c9d8; border-radius: 4px; }

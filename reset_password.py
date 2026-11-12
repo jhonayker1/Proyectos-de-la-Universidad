@@ -9,6 +9,7 @@ from getpass import getpass
 
 from app.core.security import hash_password
 from app.database.session import SessionLocal, check_database_connection
+from app.services.auditoria_service import establecer_origen  # además registra la auditoría
 from app.services.auth_service import find_user_by_email
 
 
@@ -22,6 +23,7 @@ def reset_password(correo: str, password: str) -> str:
         user = find_user_by_email(db, correo)
         if user is None:
             raise ValueError(f"No existe un usuario con el correo {correo}.")
+        establecer_origen(db, "Consola del servidor (reset_password.py)")
         user.password_hash = hash_password(password)
         db.commit()
         estado = "activo" if user.is_active else "INACTIVO (no podrá entrar hasta activarlo)"

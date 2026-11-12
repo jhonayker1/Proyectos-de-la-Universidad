@@ -19,6 +19,8 @@ class Categoria(Base):
     estado = Column(SmallInteger, nullable=False, default=1, server_default="1")
     # Margen de ganancia (%) por defecto de los productos de la categoría (migración 002).
     margen_ganancia = Column(Numeric(5, 2), nullable=False, default=0, server_default="0")
+    # Código de la categoría para el SKU automático: LUB -> LUB-0001 (migración 003).
+    prefijo_sku = Column(String(5), nullable=True, unique=True)
 
 
 class Marca(Base):

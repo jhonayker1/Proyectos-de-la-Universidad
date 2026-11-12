@@ -20,6 +20,7 @@ from app.schemas.compras import (
     DetalleCompraRead,
     EntradaStockRead,
 )
+from app.services.auditoria_service import establecer_origen
 from app.services.precios_service import apply_margin_price
 
 router = APIRouter(
@@ -121,6 +122,7 @@ def create_purchase(
     admin: Usuario = Depends(require_roles(["admin"])),
 ) -> CompraRead:
     """Registra la compra y, en la misma transacción, suma el stock de cada producto."""
+    establecer_origen(db, "Compra a proveedor (entrada de stock)")
     proveedor = db.get(Proveedor, compra_in.id_proveedor)
     if proveedor is None or proveedor.estado != 1:
         raise HTTPException(status_code=404, detail="Proveedor no encontrado o eliminado.")

@@ -1,20 +1,26 @@
 /** Una función por endpoint del backend (ver README del backend para permisos). */
 import { api } from './client'
 import type {
+  CampoImportable,
   Categoria,
   Compra,
   CompraCreate,
   Dashboard,
   EntradaStock,
   Factura,
+  FiltroAuditoria,
+  FiltrosAuditoriaOpciones,
   Marca,
   Moneda,
   MovimientosStock,
+  OpcionesImportacion,
+  PaginaAuditoria,
   Producto,
   ProductoAdmin,
   ProductoInput,
   Proveedor,
   PuntoSerie,
+  ResultadoImportacion,
   ResumenVentas,
   StockCategoria,
   Tasa,
@@ -76,9 +82,45 @@ export const productosApi = {
     api.get<Producto[]>('/productos/', q),
   listAdmin: () => api.get<ProductoAdmin[]>('/productos/admin'),
   stockBajo: () => api.get<ProductoAdmin[]>('/productos/stock-bajo'),
+  /** Vista previa del SKU que recibirá un producto nuevo de la categoría. */
+  siguienteSku: (id_categoria: number) =>
+    api.get<{ sku: string; prefijo: string }>('/productos/siguiente-sku', { id_categoria }),
   create: (data: ProductoInput) => api.post<ProductoAdmin>('/productos/', data),
   update: (id: number, data: Partial<ProductoInput>) => api.put<ProductoAdmin>(`/productos/${id}`, data),
   remove: (id: number) => api.delete(`/productos/${id}`),
+}
+
+function formularioImportacion(archivo: File, op: OpcionesImportacion) {
+  const form = new FormData()
+  form.append('archivo', archivo)
+  form.append('modo', op.modo)
+  form.append('si_existe', op.si_existe)
+  form.append('crear_faltantes', String(op.crear_faltantes))
+  if (op.id_categoria_defecto) form.append('id_categoria_defecto', String(op.id_categoria_defecto))
+  if (op.hoja) form.append('hoja', op.hoja)
+  if (op.mapeo && Object.keys(op.mapeo).length) form.append('mapeo', JSON.stringify(op.mapeo))
+  return form
+}
+
+/** Bitácora de auditoría: solo lectura y exportación. */
+export const auditoriaApi = {
+  list: (f: FiltroAuditoria & { pagina: number; por_pagina: number }) => api.get<PaginaAuditoria>('/auditoria/', f),
+  filtros: () => api.get<FiltrosAuditoriaOpciones>('/auditoria/filtros'),
+  exportar: (formato: 'xlsx' | 'csv', f: FiltroAuditoria) => {
+    const qs = new URLSearchParams({ formato })
+    for (const [k, v] of Object.entries(f)) if (v !== undefined && v !== '') qs.set(k, String(v))
+    return api.blob(`/auditoria/exportar?${qs}`)
+  },
+}
+
+/** Carga masiva desde Excel/CSV: validar (vista previa), estricto (todo o nada) o parcial. */
+export const importacionApi = {
+  campos: () => api.get<CampoImportable[]>('/productos/importar/campos'),
+  plantilla: () => api.blob('/productos/importar/plantilla'),
+  importar: (archivo: File, op: OpcionesImportacion) =>
+    api.post<ResultadoImportacion>('/productos/importar', formularioImportacion(archivo, op)),
+  /** Excel con los errores y las filas a corregir de esa misma validación o importación. */
+  reporte: (reporteId: string) => api.blob(`/productos/importar/reportes/${reporteId}`),
 }
 
 export const finanzasApi = {

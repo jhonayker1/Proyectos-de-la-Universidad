@@ -23,6 +23,7 @@ from app.schemas.ventas import (
     VentaCreate,
     VentaRead,
 )
+from app.services.auditoria_service import establecer_origen
 from app.services.finanzas_service import get_moneda, require_tasa_vigente
 
 router = APIRouter(prefix="/ventas", tags=["ventas"])
@@ -119,6 +120,7 @@ def create_sale(
     db: Session = Depends(get_db),
     vendedor: Usuario = Depends(require_roles(["admin", "cashier"])),
 ) -> VentaRead:
+    establecer_origen(db, "Venta en punto de venta")
     moneda = get_moneda(db, venta_in.codigo_moneda_pago)
     tasa = Decimal("1") if moneda.es_base == 1 else require_tasa_vigente(db, moneda).tasa_venta
 
@@ -234,6 +236,7 @@ def cancel_sale(
         raise HTTPException(status_code=404, detail="Venta no encontrada.")
     if venta.estado == VENTA_ANULADA:
         raise HTTPException(status_code=409, detail="La venta ya está anulada.")
+    establecer_origen(db, f"Anulación de la venta {venta.numero_factura}")
 
     productos = lock_products(db, sorted({d.id_producto for d in venta.detalles}))
     for detalle in venta.detalles:

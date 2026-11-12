@@ -5,7 +5,8 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class ProductoCreate(BaseModel):
-    sku: str = Field(min_length=1, max_length=50)
+    # Si se omite, se genera según la categoría: LUB-27 -> LUB-28 (ver sku_service).
+    sku: str | None = Field(default=None, min_length=1, max_length=50)
     nombre: str = Field(min_length=1, max_length=150)
     id_categoria: int = Field(gt=0)
     id_marca: int | None = Field(default=None, gt=0)

@@ -1,4 +1,4 @@
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jwt import ExpiredSignatureError, InvalidTokenError
 from sqlalchemy.orm import Session
@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.core.security import decode_access_token
 from app.database.session import get_db
 from app.models.usuarios import Usuario
+from app.services.auditoria_service import establecer_contexto
 
 bearer_scheme = HTTPBearer(auto_error=False)
 
@@ -19,6 +20,7 @@ def unauthorized(detail: str) -> HTTPException:
 
 
 def get_current_user(
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
     db: Session = Depends(get_db),
 ) -> Usuario:
@@ -41,6 +43,8 @@ def get_current_user(
         raise unauthorized("Usuario no encontrado.")
     if not user.is_active:
         raise unauthorized("Usuario inactivo.")
+    # Los cambios que haga esta petición quedan en la auditoría a nombre de este usuario.
+    establecer_contexto(db, usuario=user, request=request)
     return user
 
 

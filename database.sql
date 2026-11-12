@@ -1,7 +1,8 @@
 -- Esquema de cauchos_rey_def (extraído del respaldo pg_dump del proyecto).
 -- El backend trabaja sobre estas tablas tal cual; no las crea ni las modifica.
 -- Úselo solo para montar una base nueva vacía con la misma estructura y, después,
--- aplique migrations/002_frontend.sql (márgenes, proveedores, compras y facturas).
+-- aplique migrations/002_frontend.sql (márgenes, proveedores, compras y facturas)
+-- y migrations/003_sku_por_categoria.py (código de categoría para el SKU automático).
 
 CREATE TABLE public.roles (
     id_rol SERIAL PRIMARY KEY,

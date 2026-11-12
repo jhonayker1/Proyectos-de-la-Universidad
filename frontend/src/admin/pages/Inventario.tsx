@@ -1,10 +1,12 @@
 import React from 'react'
-import { Pencil, Plus, Trash2 } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
+import { FileSpreadsheet, Pencil, Plus, Trash2 } from 'lucide-react'
+import ImportarInventario from '@/admin/components/ImportarInventario'
 import { productosApi } from '@/api/endpoints'
 import { keys, useApiMutation, useCategorias, useMarcas, useProductosAdmin, useProveedores } from '@/api/queries'
 import type { ProductoAdmin, ProductoInput } from '@/api/types'
 import { CurrencySelect, FiltrosBar, StockCell, emojiCategoria, useFiltrosProductos, useTasas, type MonedaVista } from '@/shared/components/productos'
-import { Badge, ConfirmDialog, EmptyState, ErrorBanner, Field, Modal, Pagination, Spinner, useToast } from '@/shared/components/ui'
+import { Badge, ConfirmDialog, EmptyState, ErrorBanner, Field, Modal, Pagination, Spinner, errorText, useToast } from '@/shared/components/ui'
 import { num, parseDecimal, precioConMargen, usd } from '@/shared/lib/money'
 
 type Form = {
@@ -30,9 +32,15 @@ function ProductoModal({ producto, onClose }: { producto: ProductoAdmin | null; 
   }))
   const set = (k: keyof Form) => (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => setForm(f => ({ ...f, [k]: e.target.value }))
 
-  // Al crear, la primera categoría es la predeterminada.
-  const idCategoria = form.id_categoria || String(categorias.data?.[0]?.id_categoria ?? '')
+  // La categoría define el código del SKU, así que al crear se elige a propósito (sin valor por defecto).
+  const idCategoria = form.id_categoria
   const categoria = categorias.data?.find(c => String(c.id_categoria) === idCategoria)
+  // Vista previa del SKU automático; el número definitivo lo asigna el backend al guardar.
+  const skuPrevio = useQuery({
+    queryKey: [...keys.productos, 'siguiente-sku', idCategoria],
+    queryFn: () => productosApi.siguienteSku(Number(idCategoria)),
+    enabled: !producto && idCategoria !== '',
+  })
   const margenCat = num(categoria?.margen_ganancia)
   const margenPropio = form.margen.trim() === '' ? null : parseDecimal(form.margen)
   const margen = margenPropio ?? margenCat
@@ -41,7 +49,6 @@ function ProductoModal({ producto, onClose }: { producto: ProductoAdmin | null; 
   const precioVenta = manual ? parseDecimal(form.precio_manual || '0') : precioConMargen(costo, margen)
 
   const errores = [
-    !form.sku.trim() && 'SKU',
     !form.nombre.trim() && 'nombre',
     !idCategoria && 'categoría',
     !(costo >= 0) && 'precio distribuidor',
@@ -52,8 +59,9 @@ function ProductoModal({ producto, onClose }: { producto: ProductoAdmin | null; 
   ].filter(Boolean)
 
   const guardar = useApiMutation(async () => {
+    // Sin "sku": al crear lo genera el backend y al editar se conserva el que ya tiene.
     const data: ProductoInput = {
-      sku: form.sku.trim(), nombre: form.nombre.trim(), id_categoria: Number(idCategoria),
+      nombre: form.nombre.trim(), id_categoria: Number(idCategoria),
       id_marca: form.id_marca ? Number(form.id_marca) : null,
       id_proveedor: form.id_proveedor ? Number(form.id_proveedor) : null,
       precio_distribuidor: costo.toFixed(2),
@@ -64,7 +72,16 @@ function ProductoModal({ producto, onClose }: { producto: ProductoAdmin | null; 
       stock_actual: Number(form.stock_actual), stock_minimo: Number(form.stock_minimo),
     }
     return producto ? productosApi.update(producto.id_producto, data) : productosApi.create(data)
-  }, [keys.productos, keys.reportes], p => { toast(`${p.nombre} guardado (${usd(p.precio_usd)}).`); onClose() })
+  }, [keys.productos, keys.reportes, keys.categorias],
+  p => { toast(`${p.nombre} guardado con SKU ${p.sku} (${usd(p.precio_usd)}).`); onClose() })
+
+  const skuMostrado = producto ? form.sku
+    : !idCategoria ? '' : skuPrevio.data?.sku ?? (skuPrevio.isLoading ? 'Calculando…' : '')
+  const skuAyuda = producto
+    ? 'El código no cambia al editar ni al cambiar de categoría.'
+    : !idCategoria ? 'Elija la categoría: el código se genera según ella.'
+      : skuPrevio.error ? <span className="text-danger">{errorText(skuPrevio.error)}</span>
+        : `Automático según la categoría (${categoria?.prefijo_sku ?? '…'}). Se confirma al guardar.`
 
   return (
     <Modal title={producto ? 'Editar producto' : 'Nuevo producto'} width="max-w-xl" onClose={onClose} footer={<>
@@ -75,11 +92,17 @@ function ProductoModal({ producto, onClose }: { producto: ProductoAdmin | null; 
       </button>
     </>}>
       <div className="grid grid-cols-2 gap-3.5">
-        <Field label="SKU"><input className="input" value={form.sku} onChange={set('sku')} placeholder="CR-0001" autoFocus /></Field>
         <Field label="Categoría">
-          <select className="input" value={idCategoria} onChange={set('id_categoria')}>
-            {categorias.data?.map(c => <option key={c.id_categoria} value={c.id_categoria}>{c.nombre}</option>)}
+          <select className="input" value={idCategoria} onChange={set('id_categoria')} autoFocus={!producto}>
+            {!producto && <option value="" disabled>Seleccione una categoría…</option>}
+            {categorias.data?.map(c => (
+              <option key={c.id_categoria} value={c.id_categoria}>{c.nombre}{c.prefijo_sku ? ` (${c.prefijo_sku})` : ''}</option>
+            ))}
           </select>
+        </Field>
+        <Field label={producto ? 'SKU' : 'SKU (automático)'} hint={skuAyuda}>
+          <input className="input cursor-not-allowed font-mono font-semibold !text-primary" value={skuMostrado} readOnly
+            aria-readonly="true" placeholder="—" tabIndex={-1} />
         </Field>
         <Field label="Nombre" className="col-span-2"><input className="input" value={form.nombre} onChange={set('nombre')} /></Field>
         <Field label="Marca">
@@ -139,6 +162,7 @@ export default function Inventario() {
   const f = useFiltrosProductos(productos.data)
   const [modal, setModal] = React.useState<{ producto: ProductoAdmin | null } | null>(null)
   const [eliminar, setEliminar] = React.useState<ProductoAdmin | null>(null)
+  const [importar, setImportar] = React.useState(false)
   const eliminacion = useApiMutation((p: ProductoAdmin) => productosApi.remove(p.id_producto),
     [keys.productos, keys.reportes, keys.categorias], () => {
       toast(`${eliminar?.nombre ?? 'Producto'} eliminado del inventario.`); setEliminar(null)
@@ -147,6 +171,7 @@ export default function Inventario() {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
       <FiltrosBar filtros={f.filtros} setFiltros={f.setFiltros} limpiar={f.limpiar}>
+        <button className="btn-muted" onClick={() => setImportar(true)}><FileSpreadsheet size={14} /> Importar Excel</button>
         <button className="btn-primary" onClick={() => setModal({ producto: null })}><Plus size={14} /> Nuevo producto</button>
       </FiltrosBar>
 
@@ -203,6 +228,7 @@ export default function Inventario() {
       </div>
 
       {modal && <ProductoModal producto={modal.producto} onClose={() => setModal(null)} />}
+      {importar && <ImportarInventario onClose={() => setImportar(false)} />}
       {eliminar && (
         <ConfirmDialog danger title="Eliminar producto" confirmText="Eliminar" busy={eliminacion.isPending}
           message={<>

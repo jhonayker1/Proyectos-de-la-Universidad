@@ -3,11 +3,21 @@ from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
+from app.services.sku_service import normalizar_prefijo
+
+
+def _prefijo_opcional(v: str | None) -> str | None:
+    return None if v is None else normalizar_prefijo(v)
+
 
 class CategoriaCreate(BaseModel):
     nombre: str = Field(min_length=1, max_length=100)
     descripcion: str | None = Field(default=None, max_length=255)
     margen_ganancia: Decimal = Field(default=Decimal("0"), ge=0, le=999.99, max_digits=5, decimal_places=2)
+    # Código para el SKU automático (2 a 5 letras). Si se omite, se deriva del nombre.
+    prefijo_sku: str | None = None
+
+    validar_prefijo = field_validator("prefijo_sku")(_prefijo_opcional)
 
 
 class CategoriaUpdate(BaseModel):
@@ -17,6 +27,10 @@ class CategoriaUpdate(BaseModel):
     margen_ganancia: Decimal | None = Field(
         default=None, ge=0, le=999.99, max_digits=5, decimal_places=2
     )
+    # Cambiarlo solo afecta a los productos nuevos; los SKU existentes no se modifican.
+    prefijo_sku: str | None = None
+
+    validar_prefijo = field_validator("prefijo_sku")(_prefijo_opcional)
 
 
 class CategoriaRead(BaseModel):
@@ -25,6 +39,7 @@ class CategoriaRead(BaseModel):
     descripcion: str | None
     estado: int
     margen_ganancia: Decimal
+    prefijo_sku: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

@@ -40,6 +40,8 @@ export interface Categoria {
   descripcion: string | null
   estado: number
   margen_ganancia: Money
+  /** Código para el SKU automático (LUB -> LUB-0028). */
+  prefijo_sku: string | null
 }
 
 export interface Marca {
@@ -89,7 +91,8 @@ export interface ProductoAdmin extends Producto {
 }
 
 export interface ProductoInput {
-  sku: string
+  /** Al crear se omite: el backend genera el siguiente SKU de la categoría. */
+  sku?: string
   nombre: string
   id_categoria: number
   id_marca: number | null
@@ -268,4 +271,105 @@ export interface Factura {
   id_compra: number | null
   id_usuario: number
   fecha_subida: string | null
+}
+
+/* ---------------- Importación masiva de inventario (POST /productos/importar) ---------------- */
+
+export type ModoImportacion = 'validar' | 'estricto' | 'parcial'
+export type SiExiste = 'actualizar' | 'omitir' | 'error'
+
+export interface OpcionesImportacion {
+  modo: ModoImportacion
+  si_existe: SiExiste
+  crear_faltantes: boolean
+  id_categoria_defecto?: number | null
+  hoja?: string | null
+  /** {"C": "precio_usd"}; "" = ignorar la columna. */
+  mapeo?: Record<string, string>
+}
+
+export interface CampoImportable {
+  clave: string
+  etiqueta: string
+  tipo: string
+  descripcion: string
+  obligatorio_al_crear: boolean
+  max_length: number | null
+  alias: string[]
+}
+
+export interface IncidenciaImportacion {
+  fila: number | null
+  columna: string | null
+  letra: string | null
+  campo: string | null
+  valor: string | null
+  motivo: string
+  nivel: 'error' | 'advertencia'
+  mensaje: string
+}
+
+export interface ResultadoImportacion {
+  estado: 'validado' | 'rechazado' | 'sin_cambios' | 'importado' | 'importado_parcial'
+  aplicado: boolean
+  mensaje: string
+  modo: ModoImportacion
+  archivo: {
+    nombre: string; formato: 'xlsx' | 'csv'; hoja: string | null; hojas: string[]
+    fila_encabezados: number; codificacion?: string | null; separador?: string | null
+  }
+  mapeo: { letra: string; columna: string; campo: string; etiqueta: string; metodo: 'alias' | 'aproximado' | 'manual'; confianza: number }[]
+  columnas_ignoradas: { letra: string; columna: string; motivo: string }[]
+  resumen: {
+    filas_leidas: number; filas_vacias_omitidas: number; filas_validas: number; filas_con_error: number
+    total_errores: number; total_advertencias: number
+    a_crear: number; a_actualizar: number; a_omitir: number; creados: number; actualizados: number
+    categorias_nuevas: { nombre: string; prefijo_sku: string | null; filas: number }[]
+    marcas_nuevas: { nombre: string; filas: number }[]
+  }
+  errores: IncidenciaImportacion[]
+  advertencias: IncidenciaImportacion[]
+  errores_truncados: boolean
+  advertencias_truncadas: boolean
+  vista_previa: { fila: number; accion: 'crear' | 'actualizar' | 'omitir'; sku: string | null; sku_automatico: boolean; nombre: string; categoria: string | null }[]
+  /** Reporte .xlsx de esta ejecución (si hubo errores o advertencias); se guarda 24 h. */
+  reporte_id?: string | null
+}
+/* ---------------- Auditoría (solo lectura) ---------------- */
+
+export interface CambioAuditado { campo: string; etiqueta: string; antes: string | null; despues: string | null }
+
+export interface RegistroAuditoria {
+  id_auditoria: number
+  fecha: string
+  id_usuario: number | null
+  nombre_usuario: string
+  rol: string | null
+  modulo: string
+  modulo_etiqueta: string
+  accion: string
+  accion_etiqueta: string
+  entidad: string
+  id_registro: string | null
+  referencia: string | null
+  descripcion: string
+  cambios: CambioAuditado[]
+  origen: string | null
+  ruta: string | null
+  ip: string | null
+  id_operacion: string | null
+}
+
+export interface PaginaAuditoria { total: number; pagina: number; por_pagina: number; items: RegistroAuditoria[] }
+
+export interface FiltrosAuditoriaOpciones {
+  modulos: { clave: string; etiqueta: string }[]
+  acciones: { clave: string; etiqueta: string }[]
+  usuarios: { id_usuario: number | null; nombre: string }[]
+}
+
+/** id_usuario 0 = acciones del sistema (sin usuario). */
+export type FiltroAuditoria = {
+  desde?: string; hasta?: string; modulo?: string; accion?: string
+  id_usuario?: number; id_operacion?: string; buscar?: string
 }

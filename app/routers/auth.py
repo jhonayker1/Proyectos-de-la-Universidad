@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import get_current_user
@@ -13,6 +13,7 @@ from app.schemas.usuarios import (
     UsuarioRead,
 )
 from app.services import recuperacion_service
+from app.services.auditoria_service import establecer_contexto
 from app.services.auth_service import authenticate_user, find_user_by_email
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -56,12 +57,16 @@ def request_recovery_code(datos: RecuperacionSolicitud, db: Session = Depends(ge
 
 
 @router.post("/recuperar/confirmar", status_code=status.HTTP_204_NO_CONTENT)
-def confirm_recovery(datos: RecuperacionConfirmacion, db: Session = Depends(get_db)) -> None:
+def confirm_recovery(
+    datos: RecuperacionConfirmacion, request: Request, db: Session = Depends(get_db)
+) -> None:
     user = find_user_by_email(db, datos.correo)
     if user is None or not recuperacion_service.consume_code(user.correo, datos.codigo):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Código inválido o vencido. Solicite uno nuevo.",
         )
+    establecer_contexto(db, usuario=user, request=request,
+                        origen="Recuperación de contraseña con código del servidor")
     user.password_hash = hash_password(datos.password)
     db.commit()

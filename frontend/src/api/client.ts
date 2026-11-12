@@ -7,10 +7,18 @@ const SIN_CONEXION =
 
 export class ApiError extends Error {
   readonly status: number
-  constructor(status: number, message: string) {
+  /** Explicación adicional que algunos endpoints envían en {detalles: string[]}. */
+  readonly details: string[]
+  constructor(status: number, message: string, details: string[] = []) {
     super(message)
     this.status = status
+    this.details = details
   }
+}
+
+function errorDetails(body: unknown): string[] {
+  const detalles = (body as { detalles?: unknown } | null)?.detalles
+  return Array.isArray(detalles) ? detalles.filter((d): d is string => typeof d === 'string') : []
 }
 
 let onUnauthorized: (() => void) | null = null
@@ -90,8 +98,25 @@ async function request<T>(method: string, path: string, opts: { query?: Query; b
   // El proxy de Vite responde 502/503/504 sin JSON cuando el backend está apagado.
   if (!isJson && res.status >= 502 && res.status <= 504) throw new ApiError(res.status, SIN_CONEXION)
   const data = isJson ? await res.json().catch(() => null) : null
-  if (!res.ok) throw new ApiError(res.status, errorMessage(res.status, data))
+  if (!res.ok) throw new ApiError(res.status, errorMessage(res.status, data), errorDetails(data))
   return data as T
+}
+
+async function fetchBlob(path: string): Promise<Blob> {
+  const token = getToken()
+  let res: Response
+  try {
+    res = await fetch(buildUrl(path), { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+  } catch {
+    throw new ApiError(0, SIN_CONEXION)
+  }
+  if (res.status === 401 && token) onUnauthorized?.()
+  if (!res.ok) {
+    const data = await res.json().catch(() => null)
+    if (!data && res.status >= 502 && res.status <= 504) throw new ApiError(res.status, SIN_CONEXION)
+    throw new ApiError(res.status, errorMessage(res.status, data), errorDetails(data))
+  }
+  return res.blob()
 }
 
 export const api = {
@@ -101,11 +126,17 @@ export const api = {
   patch: <T>(path: string, body?: unknown) => request<T>('PATCH', path, { body }),
   delete: <T = void>(path: string) => request<T>('DELETE', path),
   /** Descarga un archivo protegido (p. ej. una factura) como Blob. */
-  async blob(path: string): Promise<Blob> {
-    const token = getToken()
-    const res = await fetch(buildUrl(path), { headers: token ? { Authorization: `Bearer ${token}` } : {} })
-    if (res.status === 401 && token) onUnauthorized?.()
-    if (!res.ok) throw new ApiError(res.status, errorMessage(res.status, await res.json().catch(() => null)))
-    return res.blob()
-  },
+  blob: (path: string) => fetchBlob(path),
+}
+
+/** Guarda un Blob en la computadora del usuario con el nombre indicado. */
+export function saveBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 1000)
 }

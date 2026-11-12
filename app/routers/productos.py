@@ -27,6 +27,7 @@ from app.schemas.productos import (
 )
 from app.services.finanzas_service import local_rate_value
 from app.services.precios_service import apply_margin_price, effective_margin
+from app.services.sku_service import siguiente_sku
 
 router = APIRouter(prefix="/productos", tags=["productos"])
 
@@ -121,6 +122,21 @@ def list_low_stock(
     return [to_read(ProductoAdminRead, p, rate) for p in productos]
 
 
+@router.get("/siguiente-sku")
+def next_sku(
+    id_categoria: int = Query(gt=0),
+    db: Session = Depends(get_db),
+    _: Usuario = Depends(require_roles(["admin"])),
+) -> dict[str, str]:
+    """Vista previa del SKU que recibirá un producto nuevo de la categoría."""
+    categoria = db.get(Categoria, id_categoria)
+    if categoria is None:
+        raise HTTPException(status_code=404, detail="Categoría no encontrada.")
+    sku = siguiente_sku(db, categoria)
+    db.commit()  # guarda el código de la categoría si se acaba de derivar
+    return {"sku": sku, "prefijo": categoria.prefijo_sku}
+
+
 @router.get("/{id_producto}", response_model=ProductoRead)
 def get_product(
     id_producto: int,
@@ -141,13 +157,26 @@ def create_product(
 ) -> ProductoRead:
     values = producto_in.model_dump()
     validate_references(db, values)
-    values["sku"] = producto_in.sku.strip().upper()
-    producto = Producto(**values, estado=PRODUCTO_DISPONIBLE)
-    if producto.precio_usd is None:
-        apply_margin_price(db, producto)
-    producto.sync_stock_status()
-    db.add(producto)
-    commit_or_conflict(db)
+    automatico = not (producto_in.sku and producto_in.sku.strip())
+    for intento in range(3):
+        # Sin SKU se genera el siguiente de la categoría; si otro usuario lo tomó en el
+        # mismo instante, el índice único lo rechaza y se prueba con el próximo.
+        values["sku"] = (
+            siguiente_sku(db, db.get(Categoria, values["id_categoria"]))
+            if automatico else producto_in.sku.strip().upper()
+        )
+        producto = Producto(**values, estado=PRODUCTO_DISPONIBLE)
+        if producto.precio_usd is None:
+            apply_margin_price(db, producto)
+        producto.sync_stock_status()
+        db.add(producto)
+        try:
+            db.commit()
+            break
+        except IntegrityError as exc:
+            db.rollback()
+            if not automatico or intento == 2:
+                raise HTTPException(status_code=409, detail="El SKU ya está registrado.") from exc
     db.refresh(producto)
     return to_read(ProductoAdminRead, producto, local_rate_value(db))
 

@@ -26,6 +26,7 @@ from app.schemas.catalogo import (
     ProveedorUpdate,
 )
 from app.services.precios_service import reprice_category
+from app.services.sku_service import asegurar_prefijo_libre, ocupados, prefijo_desde_nombre
 
 
 def build_catalog_router(
@@ -39,6 +40,7 @@ def build_catalog_router(
     required_on_update: frozenset[str] = frozenset({"nombre", "estado"}),
     after_update: Callable[[Session, object, dict], None] | None = None,
     before_delete: Callable[[Session, object], None] | None = None,
+    before_create: Callable[[Session, dict], None] | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix=prefix, tags=["catalogo"])
     pk = getattr(model, pk_name)
@@ -75,6 +77,8 @@ def build_catalog_router(
     ):
         values = item_in.model_dump()
         values["nombre"] = values["nombre"].strip()
+        if before_create is not None:
+            before_create(db, values)
         item = model(**values, estado=1)
         db.add(item)
         commit_or_conflict(db)
@@ -147,19 +151,31 @@ def ensure_category_without_stock(db: Session, categoria: Categoria) -> None:
 
 
 def on_category_update(db: Session, categoria: Categoria, values: dict) -> None:
-    """Desactivar por PUT (estado = 0) exige lo mismo que por DELETE; el margen recalcula precios."""
+    """Desactivar por PUT (estado = 0) exige lo mismo que por DELETE; el margen recalcula
+    precios; el código del SKU no puede repetirse con otra categoría."""
     if values.get("estado") == 0:
         ensure_category_without_stock(db, categoria)
     if "margen_ganancia" in values:
         reprice_category(db, categoria)
+    if "prefijo_sku" in values:
+        asegurar_prefijo_libre(db, categoria.prefijo_sku, excepto_id=categoria.id_categoria)
+
+
+def on_category_create(db: Session, values: dict) -> None:
+    """Código del SKU: el indicado (si está libre) o uno derivado del nombre."""
+    if values.get("prefijo_sku"):
+        asegurar_prefijo_libre(db, values["prefijo_sku"])
+    else:
+        values["prefijo_sku"] = prefijo_desde_nombre(values["nombre"], ocupados(db))
 
 
 categorias_router = build_catalog_router(
     "/categorias", Categoria, "id_categoria",
     CategoriaCreate, CategoriaUpdate, CategoriaRead, "Categoría",
-    required_on_update=frozenset({"nombre", "estado", "margen_ganancia"}),
+    required_on_update=frozenset({"nombre", "estado", "margen_ganancia", "prefijo_sku"}),
     after_update=on_category_update,
     before_delete=ensure_category_without_stock,
+    before_create=on_category_create,
 )
 marcas_router = build_catalog_router(
     "/marcas", Marca, "id_marca", MarcaCreate, MarcaUpdate, MarcaRead, "Marca"

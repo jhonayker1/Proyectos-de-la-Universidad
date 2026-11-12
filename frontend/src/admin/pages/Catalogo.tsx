@@ -103,26 +103,45 @@ function Fila({ nombre, detalle, extra, activo, productos, unidades, onEditar, o
   )
 }
 
+/** Sugerencia de código desde el nombre (Baterías -> BAT); el backend confirma que no se repita. */
+const codigoDesdeNombre = (nombre: string) =>
+  (nombre.normalize('NFD').replace(/[̀-ͯ]/g, '').toUpperCase().match(/[A-Z]+/)?.[0] ?? '').slice(0, 3)
+
 function CategoriaModal({ categoria, onClose }: { categoria: Categoria | null; onClose: () => void }) {
   const toast = useToast()
   const [nombre, setNombre] = React.useState(categoria?.nombre ?? '')
   const [descripcion, setDescripcion] = React.useState(categoria?.descripcion ?? '')
   const [margen, setMargen] = React.useState(categoria ? String(num(categoria.margen_ganancia)) : '0')
+  const [codigo, setCodigo] = React.useState(categoria?.prefijo_sku ?? '')
+  // Mientras no lo edite a mano, el código sigue al nombre al crear una categoría.
+  const [codigoManual, setCodigoManual] = React.useState(Boolean(categoria))
   const m = parseDecimal(margen || '0')
   const margenValido = m >= 0 && m <= 999.99
+  const codigoValido = /^[A-Z]{2,5}$/.test(codigo)
+  const cambiaCodigo = Boolean(categoria?.prefijo_sku) && codigo !== categoria?.prefijo_sku
   const guardar = useApiMutation(() => {
-    const data = { nombre: nombre.trim(), descripcion: descripcion.trim() || null, margen_ganancia: String(m) }
+    const data = { nombre: nombre.trim(), descripcion: descripcion.trim() || null, margen_ganancia: String(m), prefijo_sku: codigo }
     return categoria ? categoriasApi.update(categoria.id_categoria, data) : categoriasApi.create(data)
-  }, [keys.categorias, keys.productos], c => { toast(`Categoría ${c.nombre} guardada.`); onClose() })
+  }, [keys.categorias, keys.productos], c => { toast(`Categoría ${c.nombre} guardada (código ${c.prefijo_sku}).`); onClose() })
   return (
     <Modal title={categoria ? 'Editar categoría' : 'Nueva categoría'} onClose={onClose} footer={<>
       <button className="btn-muted" onClick={onClose}>Cancelar</button>
-      <button className="btn-primary" disabled={!nombre.trim() || !margenValido || guardar.isPending} onClick={() => guardar.mutate(undefined)}>
+      <button className="btn-primary" disabled={!nombre.trim() || !margenValido || !codigoValido || guardar.isPending} onClick={() => guardar.mutate(undefined)}>
         {guardar.isPending ? 'Guardando...' : 'Guardar'}
       </button>
     </>}>
       <div className="flex flex-col gap-3.5">
-        <Field label="Nombre"><input className="input" autoFocus maxLength={100} value={nombre} onChange={e => setNombre(e.target.value)} /></Field>
+        <Field label="Nombre"><input className="input" autoFocus maxLength={100} value={nombre}
+          onChange={e => { setNombre(e.target.value); if (!codigoManual) setCodigo(codigoDesdeNombre(e.target.value)) }} /></Field>
+        <Field label="Código para el SKU"
+          hint={<span className={!codigoValido && codigo ? 'text-danger' : cambiaCodigo ? 'text-warning' : undefined}>
+            {!codigoValido && codigo ? 'De 2 a 5 letras, sin números ni acentos.'
+              : cambiaCodigo ? `Solo los productos nuevos usarán ${codigo}; los existentes conservan su SKU (${categoria?.prefijo_sku}-…).`
+                : `Los productos nuevos se numeran solos: ${codigo || 'XXX'}-0001, ${codigo || 'XXX'}-0002…`}
+          </span>}>
+          <input className={cx('input !w-32 font-mono font-semibold uppercase', codigo && !codigoValido && '!border-danger')} maxLength={5}
+            value={codigo} onChange={e => { setCodigoManual(true); setCodigo(e.target.value.toUpperCase().replace(/[^A-Z]/g, '')) }} />
+        </Field>
         <Field label="Descripción"><input className="input" maxLength={255} value={descripcion} onChange={e => setDescripcion(e.target.value)} /></Field>
         <Field label="Porcentaje de ganancia (%)"
           hint={<span className={m >= 100 ? 'text-red-600' : undefined}>
@@ -199,9 +218,13 @@ export default function Catalogo() {
           cats.length === 0 ? <EmptyState title="No hay categorías con ese criterio." /> : cats.map(c => (
             <Fila key={c.id_categoria} nombre={c.nombre} detalle={c.descripcion} activo={c.estado === 1}
               productos={conteos.cat.get(c.id_categoria) ?? 0} unidades={unidadesDe(c)}
-              extra={<span className="w-20 text-right font-display text-sm font-bold text-primary" title="Margen de ganancia">
-                {num(c.margen_ganancia) === 0 ? 'Manual' : `${num(c.margen_ganancia)}%`}
-              </span>}
+              extra={<>
+                <span className="w-14 rounded-md border border-border bg-muted px-1.5 py-0.5 text-center font-mono text-[11px] font-bold text-primary"
+                  title="Código para el SKU de los productos nuevos">{c.prefijo_sku ?? '—'}</span>
+                <span className="w-20 text-right font-display text-sm font-bold text-primary" title="Margen de ganancia">
+                  {num(c.margen_ganancia) === 0 ? 'Manual' : `${num(c.margen_ganancia)}%`}
+                </span>
+              </>}
               onEditar={() => setEditCat({ c })}
               onToggle={() => c.estado === 1 ? desactivarCategoria(c) : reactivarCat.mutate(c, onError)} />
           ))}

@@ -38,6 +38,9 @@ class Settings:
     # Carpeta donde se guardan las facturas escaneadas que sube el administrador.
     UPLOAD_DIR: Path = Path(os.getenv("UPLOAD_DIR", str(BASE_DIR / "uploads")))
     MAX_UPLOAD_MB: int = int(os.getenv("MAX_UPLOAD_MB", "10"))
+    # Carga masiva de inventario desde Excel/CSV.
+    MAX_IMPORT_MB: int = int(os.getenv("MAX_IMPORT_MB", "15"))
+    MAX_IMPORT_FILAS: int = int(os.getenv("MAX_IMPORT_FILAS", "50000"))
     DATABASE_URL: str = build_database_url()
     DB_POOL_SIZE: int = int(os.getenv("DB_POOL_SIZE", "10"))
     DB_MAX_OVERFLOW: int = int(os.getenv("DB_MAX_OVERFLOW", "20"))

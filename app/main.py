@@ -14,11 +14,13 @@ from app.database.session import (
     init_db,
 )
 from app.routers import (
+    auditoria,
     auth,
     catalogo,
     compras,
     facturas,
     finanzas,
+    importacion,
     productos,
     reportes,
     usuarios,
@@ -100,6 +102,7 @@ app.include_router(usuarios.router)
 app.include_router(catalogo.categorias_router)
 app.include_router(catalogo.marcas_router)
 app.include_router(catalogo.proveedores_router)
+app.include_router(importacion.router)  # antes de productos: /productos/importar/...
 app.include_router(productos.router)
 app.include_router(finanzas.monedas_router)
 app.include_router(finanzas.tasas_router)
@@ -107,6 +110,7 @@ app.include_router(ventas.router)
 app.include_router(compras.router)
 app.include_router(facturas.router)
 app.include_router(reportes.router)
+app.include_router(auditoria.router)
 
 
 @app.get("/")
