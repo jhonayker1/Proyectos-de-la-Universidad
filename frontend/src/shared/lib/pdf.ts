@@ -3,7 +3,7 @@
  * Une los dos generadores que estaban duplicados en Admin/src/pdfLayout.ts y Cajero/InventoryApp.tsx.
  */
 import logoPdf from '@/assets/logo-pdf.png'
-import type { Venta } from '@/api/types'
+import type { ExportacionAuditoria, Venta } from '@/api/types'
 import { fmtFechaLarga, fmtHora, iso, parseLocal } from './dates'
 import { fmtMoneda, num } from './money'
 
@@ -24,9 +24,15 @@ export function cargarImagen(src: string) {
   })
 }
 
-async function nuevoPdf(orientation: 'portrait' | 'landscape' = 'landscape', format: string | number[] = 'a4') {
+/** protegido: el PDF se cifra con permiso solo de impresión (no se puede editar, copiar
+ * texto ni anotar). La clave de propietario es aleatoria y no se guarda: nadie puede
+ * levantar la restricción. */
+async function nuevoPdf(orientation: 'portrait' | 'landscape' = 'landscape', format: string | number[] = 'a4', protegido = false) {
   const { jsPDF } = await import('jspdf')
-  return { pdf: new jsPDF({ orientation, unit: 'pt', format }), logo: await cargarImagen(logoPdf) }
+  const encryption = protegido
+    ? { userPassword: '', ownerPassword: crypto.getRandomValues(new Uint32Array(4)).join('-'), userPermissions: ['print' as const] }
+    : undefined
+  return { pdf: new jsPDF({ orientation, unit: 'pt', format, encryption }), logo: await cargarImagen(logoPdf) }
 }
 
 /** Cabecera con logo; devuelve la coordenada Y donde empieza el contenido. */
@@ -43,7 +49,7 @@ function cabecera(pdf: Doc, logo: HTMLImageElement, titulo: string, subtitulo: s
   return 108
 }
 
-function pies(pdf: Doc) {
+function pies(pdf: Doc, texto = 'Representaciones July Cauchos Rey  ·  Documento generado automaticamente') {
   const W = pdf.internal.pageSize.getWidth()
   const H = pdf.internal.pageSize.getHeight()
   const n = pdf.getNumberOfPages()
@@ -51,7 +57,7 @@ function pies(pdf: Doc) {
     pdf.setPage(i)
     pdf.setDrawColor(...GOLD); pdf.setLineWidth(1.2); pdf.line(40, H - 38, W - 40, H - 38)
     pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8); pdf.setTextColor(...MUTED)
-    pdf.text('Representaciones July Cauchos Rey  ·  Documento generado automaticamente', 40, H - 24)
+    pdf.text(texto, 40, H - 24)
     pdf.text(`Pagina ${i} de ${n}`, W - 40, H - 24, { align: 'right' })
   }
 }
@@ -196,6 +202,91 @@ export async function pdfRespaldo(modo: string, ini: Date, fin: Date, dias: DiaR
   totalFinal(pdf, y, `Total facturado: ${fmtMoneda(totalUSD, 'USD')}${bs}`)
   pies(pdf)
   pdf.save(`respaldo-${modo.toLowerCase()}-${iso(ini)}_${iso(fin)}.pdf`)
+}
+
+/** Las fuentes estándar del PDF usan WinAnsi: los acentos y la ñ salen bien, pero símbolos
+ * como la flecha no existen. Se reemplazan por equivalentes que sí se imprimen. */
+const WIN_ANSI_EXTRA = new Set('€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ')
+function textoPdf(s: string | null | undefined) {
+  return (s ?? '').replace(/→/g, '->').replace(/←/g, '<-').replace(/[   ]/g, ' ')
+    .replace(/[^\x00-\xff]/g, c => (WIN_ANSI_EXTRA.has(c) ? c : c.normalize('NFKD').replace(/[^\x00-\xff]/g, '') || '?'))
+}
+
+/** Reporte de auditoría en PDF protegido (solo lectura e impresión), con los filtros aplicados. */
+export async function pdfAuditoria(datos: ExportacionAuditoria, filtros: string) {
+  const { pdf, logo } = await nuevoPdf('landscape', 'a4', true)
+  pdf.setDocumentProperties({
+    title: 'Reporte de auditoria', subject: filtros, author: datos.generado_por,
+    creator: 'Representaciones July Cauchos Rey', keywords: 'auditoria, bitacora, solo lectura',
+  })
+  const W = pdf.internal.pageSize.getWidth()
+  const H = pdf.internal.pageSize.getHeight()
+  const M = 40
+  const generado = parseLocal(datos.generado)
+  const fechas = datos.registros.map(r => parseLocal(r.fecha).getTime())
+  const corta = (t: number) => new Date(t).toLocaleDateString('es-VE', { day: '2-digit', month: '2-digit' })
+  const periodo = fechas.length
+    ? `${corta(Math.min(...fechas))} al ${new Date(Math.max(...fechas)).toLocaleDateString('es-VE', { day: '2-digit', month: '2-digit', year: 'numeric' })}`
+    : 'Sin registros'
+  let y = cabecera(pdf, logo, 'Reporte de Auditoría',
+    textoPdf(`Generado el ${generado.toLocaleString('es-VE')} por ${datos.generado_por}${datos.rol ? ` (${datos.rol})` : ''}  ·  Documento de solo lectura`))
+  y = tarjetas(pdf, y, [
+    ['REGISTROS', String(datos.total), [79, 70, 229]],
+    ['PERIODO', periodo, [6, 182, 212]],
+    ['USUARIOS', String(new Set(datos.registros.map(r => r.nombre_usuario)).size), [16, 185, 129]],
+    ['MODULOS', String(new Set(datos.registros.map(r => r.modulo)).size), [245, 158, 11]],
+  ])
+  pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8.5); pdf.setTextColor(...MUTED)
+  for (const linea of pdf.splitTextToSize(textoPdf(`Filtros aplicados: ${filtros}`), W - 2 * M)) { pdf.text(linea, M, y); y += 11 }
+  y += 6
+
+  // Tabla con filas de alto variable: la descripción y el origen se ajustan en varias líneas.
+  const cols = [
+    { titulo: 'Fecha y hora', x: 8, w: 86 }, { titulo: 'Usuario', x: 100, w: 110 }, { titulo: 'Módulo', x: 216, w: 78 },
+    { titulo: 'Acción', x: 298, w: 82 }, { titulo: 'Descripción del cambio', x: 386, w: W - 2 * M - 394 },
+  ]
+  const cabeceraTabla = (yy: number) => {
+    pdf.setFillColor(79, 70, 229); pdf.roundedRect(M, yy, W - 2 * M, 24, 6, 6, 'F')
+    pdf.setTextColor(255); pdf.setFont('helvetica', 'bold'); pdf.setFontSize(9)
+    cols.forEach(c => pdf.text(textoPdf(c.titulo), M + c.x, yy + 16))
+    return yy + 24
+  }
+  y = cabeceraTabla(y)
+  if (datos.registros.length === 0) {
+    pdf.setFont('helvetica', 'italic'); pdf.setFontSize(9.5); pdf.setTextColor(...MUTED)
+    pdf.text('No hay registros con los filtros aplicados.', M + 8, y + 22)
+  }
+  datos.registros.forEach((r, i) => {
+    pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8.5)
+    const desc: string[] = pdf.splitTextToSize(textoPdf(r.descripcion), cols[4].w)
+    pdf.setFontSize(7.5)
+    const extra: string[] = r.origen ? pdf.splitTextToSize(textoPdf(`Origen: ${r.origen}`), cols[4].w) : []
+    pdf.setFont('helvetica', 'bold'); pdf.setFontSize(8.5)
+    const usuario: string[] = pdf.splitTextToSize(textoPdf(r.nombre_usuario), cols[1].w)
+    const accion: string[] = pdf.splitTextToSize(textoPdf(r.accion_etiqueta), cols[3].w)
+    const alto = Math.max(desc.length * 10.5 + extra.length * 9.5, usuario.length * 10.5 + 9.5, accion.length * 10.5, 21) + 10
+    if (y + alto > H - 56) { pdf.addPage(); y = cabeceraTabla(40) }
+    if (i % 2) { pdf.setFillColor(247, 249, 253); pdf.rect(M, y, W - 2 * M, alto, 'F') }
+    const top = y + 14
+    pdf.setFont('helvetica', 'normal'); pdf.setFontSize(8.5); pdf.setTextColor(...INK)
+    pdf.text(parseLocal(r.fecha).toLocaleDateString('es-VE'), M + cols[0].x, top)
+    pdf.setTextColor(...MUTED); pdf.text(fmtHora(r.fecha), M + cols[0].x, top + 10.5)
+    pdf.setTextColor(...INK); pdf.setFont('helvetica', 'bold')
+    usuario.forEach((l, k) => pdf.text(l, M + cols[1].x, top + k * 10.5))
+    pdf.setFont('helvetica', 'normal'); pdf.setFontSize(7.5); pdf.setTextColor(...MUTED)
+    pdf.text(textoPdf(r.rol ?? 'Sistema'), M + cols[1].x, top + usuario.length * 10.5)
+    pdf.setFontSize(8.5); pdf.setTextColor(...INK)
+    pdf.text(textoPdf(r.modulo_etiqueta), M + cols[2].x, top)
+    pdf.setFont('helvetica', 'bold'); accion.forEach((l, k) => pdf.text(l, M + cols[3].x, top + k * 10.5))
+    pdf.setFont('helvetica', 'normal')
+    desc.forEach((l, k) => pdf.text(l, M + cols[4].x, top + k * 10.5))
+    pdf.setFontSize(7.5); pdf.setTextColor(...MUTED)
+    extra.forEach((l, k) => pdf.text(l, M + cols[4].x, top + desc.length * 10.5 + k * 9.5))
+    pdf.setDrawColor(232, 236, 245); pdf.setLineWidth(0.6); pdf.line(M, y + alto, W - M, y + alto)
+    y += alto
+  })
+  pies(pdf, textoPdf(`Bitácora de auditoría  ·  Documento de solo lectura  ·  ${datos.archivo}`))
+  pdf.save(datos.archivo)
 }
 
 /** Ticket de venta en formato de recibo (80 mm) para el cliente. */

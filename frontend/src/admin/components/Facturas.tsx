@@ -3,6 +3,7 @@ import React from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { FileText, X } from 'lucide-react'
 import { facturasApi } from '@/api/endpoints'
+import { usePermisos } from '@/auth/permisos'
 import { keys, useApiMutation } from '@/api/queries'
 import type { Factura } from '@/api/types'
 import { ErrorBanner, Spinner, errorText, useToast } from '@/shared/components/ui'
@@ -47,6 +48,7 @@ export default function Facturas() {
     return d >= iso(lunes) && d <= iso(domingo)
   })
   const subir = useApiMutation((file: File) => facturasApi.upload(file), [keys.facturas])
+  const { borrarFacturas } = usePermisos()
   const borrar = useApiMutation((f: Factura) => facturasApi.remove(f.id_factura_img), [keys.facturas], () => toast('Factura eliminada.'))
 
   const addFiles = async (files: FileList | null) => {
@@ -118,10 +120,12 @@ export default function Facturas() {
                       <div className="truncate text-xs font-semibold">{f.nombre_original}</div>
                       <div className="text-[11px] text-muted-foreground">{f.fecha_subida ? parseLocal(f.fecha_subida).toLocaleDateString('es-VE') : ''} · {(f.tamano_bytes / 1024).toFixed(0)} KB</div>
                     </div>
-                    <button aria-label={`Eliminar ${f.nombre_original}`} className="btn-icon border-none bg-transparent text-danger"
-                      onClick={() => { if (window.confirm(`¿Eliminar ${f.nombre_original}?`)) borrar.mutate(f, { onError: e => toast(errorText(e), 'error') }) }}>
-                      <X size={15} />
-                    </button>
+                    {borrarFacturas && (
+                      <button aria-label={`Eliminar ${f.nombre_original}`} className="btn-icon border-none bg-transparent text-danger"
+                        onClick={() => { if (window.confirm(`¿Eliminar ${f.nombre_original}?`)) borrar.mutate(f, { onError: e => toast(errorText(e), 'error') }) }}>
+                        <X size={15} />
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>

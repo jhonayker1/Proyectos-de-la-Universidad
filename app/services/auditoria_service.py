@@ -30,7 +30,15 @@ from app.core.dates import local_now
 from app.models.auditoria import Auditoria
 from app.models.compras import Compra, FacturaImagen
 from app.models.finanzas import Moneda, TasaCambio
-from app.models.inventario import PRODUCTO_INACTIVO, Categoria, Marca, Producto, Proveedor
+from app.models.inventario import (
+    MOTIVOS_AJUSTE,
+    PRODUCTO_INACTIVO,
+    AjusteStock,
+    Categoria,
+    Marca,
+    Producto,
+    Proveedor,
+)
 from app.models.usuarios import Rol, Usuario
 from app.models.ventas import VENTA_ANULADA, Venta
 
@@ -47,6 +55,11 @@ MODULOS = {
     "importacion": "Importación",
     "auditoria": "Auditoría",
 }
+# Lo que el gestor puede ver en la auditoría: sin usuarios, tasas, categorías (márgenes)
+# ni la propia auditoría, que son configuración del administrador.
+MODULOS_OPERATIVOS = frozenset({
+    "inventario", "marcas", "proveedores", "ventas", "compras", "facturas", "importacion",
+})
 ACCIONES = {
     "crear": "Crear",
     "modificar": "Modificar",
@@ -59,8 +72,9 @@ ACCIONES = {
     "pago": "Cambio de pago",
     "importar": "Importar",
     "exportar": "Exportar",
+    "ajuste": "Ajuste de stock",
 }
-ROLES = {"admin": "Administrador", "cashier": "Cajero"}
+ROLES = {"admin": "Administrador", "gestor": "Gestor", "cashier": "Cajero"}
 SISTEMA = "Sistema"
 OCULTO = "(oculta)"
 
@@ -85,6 +99,7 @@ class Seguimiento:
     banderas: dict[str, tuple[str, str]] = field(default_factory=dict)  # 1 / 0
     secretos: frozenset[str] = frozenset()
     texto_crear: Callable[[dict[str, Any], str], str] | None = None
+    accion_crear: str = "crear"  # p. ej. "ajuste" para un ajuste de stock
 
     @property
     def articulo(self) -> str:
@@ -132,7 +147,8 @@ SEGUIMIENTOS: dict[type, Seguimiento] = {
     Proveedor: Seguimiento(
         "proveedores", "proveedor", False,
         {"nombre": "Nombre", "rif": "RIF", "telefono": "Teléfono", "correo": "Correo",
-         "contacto": "Contacto", "ciudad": "Ciudad", "condiciones": "Condiciones", "estado": "Estado"},
+         "contacto": "Contacto", "ciudad": "Ciudad", "direccion": "Dirección",
+         "condiciones": "Condiciones", "estado": "Estado"},
         lambda v, _: str(v.get("nombre")),
         banderas={"estado": ACTIVO},
     ),
@@ -181,6 +197,18 @@ SEGUIMIENTOS: dict[type, Seguimiento] = {
         {"nombre_original": "Archivo", "tipo_mime": "Tipo", "tamano_bytes": "Tamaño (bytes)",
          "id_compra": "Compra"},
         lambda v, _: str(v.get("nombre_original")),
+    ),
+    AjusteStock: Seguimiento(
+        "inventario", "ajuste de stock", False,
+        {"id_producto": "Producto", "cantidad": "Cantidad", "stock_anterior": "Stock anterior",
+         "stock_nuevo": "Stock nuevo", "motivo": "Motivo", "observacion": "Observación"},
+        lambda v, i: f"#{i} · {v.get('id_producto')}",
+        nombres={"id_producto": (Producto.id_producto, Producto.nombre)},
+        texto_crear=lambda v, _: (
+            f"Ajuste de stock de {v.get('id_producto')}: {v.get('stock_anterior')} → {v.get('stock_nuevo')} "
+            f"({MOTIVOS_AJUSTE.get(str(v.get('motivo')), v.get('motivo'))}). {v.get('observacion')}"
+        ),
+        accion_crear="ajuste",
     ),
 }
 
@@ -372,6 +400,8 @@ class _Nombres:
 
 
 def _accion(p: _Pendiente) -> str:
+    if p.tipo == "crear":
+        return p.seg.accion_crear
     if p.tipo != "modificar":
         return p.tipo
     campos = set(p.cambios)
@@ -422,7 +452,7 @@ def _fila(p: _Pendiente, nombres: _Nombres) -> dict[str, Any]:
         cambios.append({"campo": "articulos", "etiqueta": "Artículos", "antes": None, "despues": detalle})
 
     entidad = seg.entidad[0].upper() + seg.entidad[1:]
-    if accion == "crear" and seg.texto_crear is not None:
+    if p.tipo == "crear" and seg.texto_crear is not None:
         descripcion = seg.texto_crear(visibles, p.id_registro)
     elif accion in ("crear", "eliminar", "desactivar", "reactivar", "anular"):
         raiz = {"crear": "cread", "eliminar": "eliminad", "desactivar": "desactivad",
@@ -441,7 +471,7 @@ def _fila(p: _Pendiente, nombres: _Nombres) -> dict[str, Any]:
         ]
         resto = len(cambios) - _MAX_RESUMEN
         descripcion = f"{entidad} {referencia}: " + "; ".join(partes) + (f" y {resto} cambio(s) más." if resto > 0 else ".")
-    if p.articulos and accion == "crear":
+    if p.articulos and p.tipo == "crear":
         descripcion += f" {cambios[-1]['despues']}."
     return {
         "modulo": seg.modulo, "accion": accion, "entidad": seg.entidad, "id_registro": p.id_registro,

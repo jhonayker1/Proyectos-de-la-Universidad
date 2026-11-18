@@ -64,7 +64,8 @@ def init_db() -> None:
         raise RuntimeError(
             "Faltan tablas o columnas en la base de datos: " + ", ".join(missing)
             + ". Aplique las migraciones pendientes de la carpeta migrations/ "
-            "(002_frontend.sql, 003_sku_por_categoria.py y 004_auditoria.sql) antes de iniciar."
+            "(002_frontend.sql, 003_sku_por_categoria.py, 004_auditoria.sql y 005_gestor.sql) "
+            "antes de iniciar."
         )
 
 

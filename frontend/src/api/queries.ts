@@ -15,6 +15,7 @@ export const keys = {
   compras: ['compras'] as const,
   facturas: ['facturas'] as const,
   reportes: ['reportes'] as const,
+  ajustes: ['ajustes'] as const,
 }
 
 export function useCategorias() {

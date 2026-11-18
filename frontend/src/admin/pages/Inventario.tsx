@@ -1,7 +1,9 @@
 import React from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { FileSpreadsheet, Pencil, Plus, Trash2 } from 'lucide-react'
+import { FileSpreadsheet, Pencil, Plus, SlidersHorizontal, Trash2 } from 'lucide-react'
+import AjusteStockModal from '@/admin/components/AjusteStockModal'
 import ImportarInventario from '@/admin/components/ImportarInventario'
+import { usePermisos } from '@/auth/permisos'
 import { productosApi } from '@/api/endpoints'
 import { keys, useApiMutation, useCategorias, useMarcas, useProductosAdmin, useProveedores } from '@/api/queries'
 import type { ProductoAdmin, ProductoInput } from '@/api/types'
@@ -163,6 +165,8 @@ export default function Inventario() {
   const [modal, setModal] = React.useState<{ producto: ProductoAdmin | null } | null>(null)
   const [eliminar, setEliminar] = React.useState<ProductoAdmin | null>(null)
   const [importar, setImportar] = React.useState(false)
+  const [ajustar, setAjustar] = React.useState<ProductoAdmin | null>(null)
+  const permisos = usePermisos()
   const eliminacion = useApiMutation((p: ProductoAdmin) => productosApi.remove(p.id_producto),
     [keys.productos, keys.reportes, keys.categorias], () => {
       toast(`${eliminar?.nombre ?? 'Producto'} eliminado del inventario.`); setEliminar(null)
@@ -211,7 +215,10 @@ export default function Inventario() {
                     <td className="td">
                       <div className="flex gap-1.5">
                         <button aria-label={`Editar ${p.nombre}`} className="btn-icon !h-[30px] !w-[30px] text-primary" onClick={() => setModal({ producto: p })}><Pencil size={13} /></button>
-                        <button aria-label={`Eliminar ${p.nombre}`} title="Eliminar producto" className="btn-icon !h-[30px] !w-[30px] text-danger" onClick={() => setEliminar(p)}><Trash2 size={13} /></button>
+                        <button aria-label={`Ajustar stock de ${p.nombre}`} title="Ajustar stock (con motivo)" className="btn-icon !h-[30px] !w-[30px] text-accent" onClick={() => setAjustar(p)}><SlidersHorizontal size={13} /></button>
+                        {permisos.eliminarProductos && (
+                          <button aria-label={`Eliminar ${p.nombre}`} title="Eliminar producto" className="btn-icon !h-[30px] !w-[30px] text-danger" onClick={() => setEliminar(p)}><Trash2 size={13} /></button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -229,6 +236,7 @@ export default function Inventario() {
 
       {modal && <ProductoModal producto={modal.producto} onClose={() => setModal(null)} />}
       {importar && <ImportarInventario onClose={() => setImportar(false)} />}
+      {ajustar && <AjusteStockModal producto={ajustar} onClose={() => setAjustar(null)} />}
       {eliminar && (
         <ConfirmDialog danger title="Eliminar producto" confirmText="Eliminar" busy={eliminacion.isPending}
           message={<>

@@ -52,3 +52,14 @@ class FiltrosAuditoria(BaseModel):
     modulos: list[Opcion]
     acciones: list[Opcion]
     usuarios: list[UsuarioAuditado]
+
+
+class ExportacionAuditoria(BaseModel):
+    """Datos del reporte de auditoría en PDF (lo arma el navegador como documento no editable)."""
+
+    generado: datetime
+    generado_por: str
+    rol: str | None
+    archivo: str
+    total: int
+    registros: list[RegistroAuditoria]

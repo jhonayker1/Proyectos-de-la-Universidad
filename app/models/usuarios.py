@@ -10,6 +10,9 @@ ROLE_ALIASES = {
     "administrador": "admin",
     "cashier": "cashier",
     "cajero": "cashier",
+    "gestor": "gestor",
+    "asistente administrativo": "gestor",
+    "secretario": "gestor",
 }
 
 

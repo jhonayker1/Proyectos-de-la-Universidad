@@ -1,3 +1,4 @@
+from datetime import date
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -5,13 +6,17 @@ from sqlalchemy import or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.dates import day_bounds
 from app.core.dependencies import require_roles
 from app.core.money import to_local
+from app.core.permisos import GESTION, SOLO_ADMIN, TODOS
 from app.database.session import get_db
 from app.models.compras import DetalleCompra
 from app.models.inventario import (
+    MOTIVOS_AJUSTE,
     PRODUCTO_DISPONIBLE,
     PRODUCTO_INACTIVO,
+    AjusteStock,
     Categoria,
     Marca,
     Producto,
@@ -20,11 +25,14 @@ from app.models.inventario import (
 from app.models.usuarios import Usuario
 from app.models.ventas import DetalleVenta
 from app.schemas.productos import (
+    AjusteStockCreate,
+    AjusteStockRead,
     ProductoAdminRead,
     ProductoCreate,
     ProductoRead,
     ProductoUpdate,
 )
+from app.services.auditoria_service import establecer_origen
 from app.services.finanzas_service import local_rate_value
 from app.services.precios_service import apply_margin_price, effective_margin
 from app.services.sku_service import siguiente_sku
@@ -77,7 +85,7 @@ def list_products(
     id_categoria: int | None = None,
     id_marca: int | None = None,
     db: Session = Depends(get_db),
-    _: Usuario = Depends(require_roles(["admin", "cashier"])),
+    _: Usuario = Depends(require_roles(TODOS)),
 ) -> list[ProductoRead]:
     query = db.query(Producto).filter(Producto.estado != PRODUCTO_INACTIVO)
     if buscar:
@@ -95,7 +103,7 @@ def list_products(
 def list_products_admin(
     incluir_eliminados: bool = Query(default=False),
     db: Session = Depends(get_db),
-    _: Usuario = Depends(require_roles(["admin"])),
+    _: Usuario = Depends(require_roles(GESTION)),
 ) -> list[ProductoRead]:
     rate = local_rate_value(db)
     query = db.query(Producto)
@@ -107,7 +115,7 @@ def list_products_admin(
 @router.get("/stock-bajo", response_model=list[ProductoAdminRead])
 def list_low_stock(
     db: Session = Depends(get_db),
-    _: Usuario = Depends(require_roles(["admin"])),
+    _: Usuario = Depends(require_roles(GESTION)),
 ) -> list[ProductoRead]:
     rate = local_rate_value(db)
     productos = (
@@ -126,7 +134,7 @@ def list_low_stock(
 def next_sku(
     id_categoria: int = Query(gt=0),
     db: Session = Depends(get_db),
-    _: Usuario = Depends(require_roles(["admin"])),
+    _: Usuario = Depends(require_roles(GESTION)),
 ) -> dict[str, str]:
     """Vista previa del SKU que recibirá un producto nuevo de la categoría."""
     categoria = db.get(Categoria, id_categoria)
@@ -137,11 +145,80 @@ def next_sku(
     return {"sku": sku, "prefijo": categoria.prefijo_sku}
 
 
+def ajuste_to_read(a: AjusteStock) -> AjusteStockRead:
+    return AjusteStockRead(
+        id_ajuste=a.id_ajuste, id_producto=a.id_producto, sku=a.producto.sku, nombre_producto=a.producto.nombre,
+        cantidad=a.cantidad, stock_anterior=a.stock_anterior, stock_nuevo=a.stock_nuevo, motivo=a.motivo,
+        motivo_etiqueta=MOTIVOS_AJUSTE.get(a.motivo, a.motivo), observacion=a.observacion,
+        id_usuario=a.id_usuario, nombre_usuario=a.usuario.nombre_completo, fecha=a.fecha,
+    )
+
+
+@router.get("/ajustes", response_model=list[AjusteStockRead])
+def list_stock_adjustments(
+    desde: date | None = None,
+    hasta: date | None = None,
+    id_producto: int | None = None,
+    limite: int = Query(default=200, ge=1, le=5000),
+    db: Session = Depends(get_db),
+    _: Usuario = Depends(require_roles(GESTION)),
+) -> list[AjusteStockRead]:
+    """Historial de ajustes de stock con su motivo y quién los hizo."""
+    query = db.query(AjusteStock)
+    if desde:
+        query = query.filter(AjusteStock.fecha >= day_bounds(desde)[0])
+    if hasta:
+        query = query.filter(AjusteStock.fecha < day_bounds(hasta)[1])
+    if id_producto:
+        query = query.filter(AjusteStock.id_producto == id_producto)
+    return [ajuste_to_read(a) for a in query.order_by(AjusteStock.id_ajuste.desc()).limit(limite).all()]
+
+
+@router.post("/{id_producto}/ajustes", response_model=AjusteStockRead, status_code=status.HTTP_201_CREATED)
+def adjust_stock(
+    id_producto: int,
+    ajuste_in: AjusteStockCreate,
+    db: Session = Depends(get_db),
+    user: Usuario = Depends(require_roles(GESTION)),
+) -> AjusteStockRead:
+    """Corrige el stock con una justificación: sumar, restar o fijar el conteo físico.
+    Nunca deja el stock negativo y queda en la auditoría con su motivo."""
+    producto = db.query(Producto).filter(Producto.id_producto == id_producto).with_for_update(of=Producto).first()
+    if producto is None or not producto.is_active:
+        raise HTTPException(status_code=404, detail="Producto no encontrado.")
+    anterior = producto.stock_actual
+    if ajuste_in.tipo == "conteo":
+        nuevo = ajuste_in.cantidad
+    elif ajuste_in.tipo == "sumar":
+        nuevo = anterior + ajuste_in.cantidad
+    else:
+        nuevo = anterior - ajuste_in.cantidad
+    if nuevo < 0:
+        raise HTTPException(
+            status_code=409,
+            detail=f"No se pueden restar {ajuste_in.cantidad} unidades: {producto.nombre} tiene {anterior} en stock.",
+        )
+    if nuevo == anterior:
+        raise HTTPException(status_code=422, detail=f"El stock de {producto.nombre} ya es {anterior}; no hay nada que ajustar.")
+    etiqueta = MOTIVOS_AJUSTE[ajuste_in.motivo]
+    establecer_origen(db, f"Ajuste de stock: {etiqueta} — {ajuste_in.observacion}")
+    producto.stock_actual = nuevo
+    producto.sync_stock_status()
+    ajuste = AjusteStock(
+        id_producto=producto.id_producto, cantidad=nuevo - anterior, stock_anterior=anterior, stock_nuevo=nuevo,
+        motivo=ajuste_in.motivo, observacion=ajuste_in.observacion, id_usuario=user.id_usuario,
+    )
+    db.add(ajuste)
+    db.commit()
+    db.refresh(ajuste)
+    return ajuste_to_read(ajuste)
+
+
 @router.get("/{id_producto}", response_model=ProductoRead)
 def get_product(
     id_producto: int,
     db: Session = Depends(get_db),
-    _: Usuario = Depends(require_roles(["admin", "cashier"])),
+    _: Usuario = Depends(require_roles(TODOS)),
 ) -> ProductoRead:
     producto = get_or_404(db, id_producto)
     if not producto.is_active:
@@ -153,7 +230,7 @@ def get_product(
 def create_product(
     producto_in: ProductoCreate,
     db: Session = Depends(get_db),
-    _: Usuario = Depends(require_roles(["admin"])),
+    _: Usuario = Depends(require_roles(GESTION)),
 ) -> ProductoRead:
     values = producto_in.model_dump()
     validate_references(db, values)
@@ -186,10 +263,14 @@ def update_product(
     id_producto: int,
     producto_in: ProductoUpdate,
     db: Session = Depends(get_db),
-    _: Usuario = Depends(require_roles(["admin"])),
+    user: Usuario = Depends(require_roles(GESTION)),
 ) -> ProductoRead:
     producto = get_or_404(db, id_producto)
     values = producto_in.model_dump(exclude_unset=True)
+    if user.rol not in SOLO_ADMIN and "estado" in values and (
+        values["estado"] == PRODUCTO_INACTIVO or producto.estado == PRODUCTO_INACTIVO
+    ):
+        raise HTTPException(status_code=403, detail="Solo el administrador puede dar de baja o reactivar productos.")
     validate_references(db, values)
     for field, value in values.items():
         setattr(producto, field, value.strip().upper() if field == "sku" else value)
@@ -211,7 +292,7 @@ def update_product(
 def delete_product(
     id_producto: int,
     db: Session = Depends(get_db),
-    _: Usuario = Depends(require_roles(["admin"])),
+    _: Usuario = Depends(require_roles(SOLO_ADMIN)),
 ) -> None:
     """Elimina el producto. Sin ventas ni compras se borra de la base; con historial se
     oculta de todas las pantallas (estado Inactivo) para no romper facturas y reportes, y

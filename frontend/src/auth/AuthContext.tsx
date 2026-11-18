@@ -69,4 +69,4 @@ export function useCurrentUser() {
   return user
 }
 
-export const homeFor = (rol: Usuario['rol']) => (rol === 'admin' ? '/admin' : '/cajero')
+export const homeFor = (rol: Usuario['rol']) => (rol === 'admin' ? '/admin' : rol === 'gestor' ? '/gestor' : '/cajero')
