@@ -7,7 +7,6 @@ from sqlalchemy.orm import Session
 
 from app.core.dates import local_today
 from app.core.dependencies import require_roles
-from app.core.permisos import GESTION, SOLO_ADMIN
 from app.core.money import round_money
 from app.database.session import get_db
 from app.models.compras import Compra, DetalleCompra
@@ -27,7 +26,7 @@ from app.services.precios_service import apply_margin_price
 router = APIRouter(
     prefix="/compras",
     tags=["compras"],
-    dependencies=[Depends(require_roles(GESTION))],
+    dependencies=[Depends(require_roles(["admin"]))],
 )
 
 
@@ -120,7 +119,7 @@ def get_purchase(id_compra: int, db: Session = Depends(get_db)) -> CompraRead:
 def create_purchase(
     compra_in: CompraCreate,
     db: Session = Depends(get_db),
-    admin: Usuario = Depends(require_roles(GESTION)),
+    admin: Usuario = Depends(require_roles(["admin"])),
 ) -> CompraRead:
     """Registra la compra y, en la misma transacción, suma el stock de cada producto."""
     establecer_origen(db, "Compra a proveedor (entrada de stock)")
@@ -168,10 +167,7 @@ def create_purchase(
     return to_read(compra)
 
 
-@router.patch(
-    "/{id_compra}/pagado", response_model=CompraRead,
-    dependencies=[Depends(require_roles(SOLO_ADMIN))],  # movimiento contable: solo admin
-)
+@router.patch("/{id_compra}/pagado", response_model=CompraRead)
 def set_paid(
     id_compra: int,
     update: CompraPagadoUpdate,

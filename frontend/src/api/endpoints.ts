@@ -1,19 +1,12 @@
 /** Una función por endpoint del backend (ver README del backend para permisos). */
 import { api } from './client'
 import type {
-  AjusteStock,
-  AjusteStockInput,
   CampoImportable,
   Categoria,
-  CuentasPorPagar,
-  Kardex,
-  ReporteVentasDia,
-  ResumenGestor,
   Compra,
   CompraCreate,
   Dashboard,
   EntradaStock,
-  ExportacionAuditoria,
   Factura,
   FiltroAuditoria,
   FiltrosAuditoriaOpciones,
@@ -95,9 +88,6 @@ export const productosApi = {
   create: (data: ProductoInput) => api.post<ProductoAdmin>('/productos/', data),
   update: (id: number, data: Partial<ProductoInput>) => api.put<ProductoAdmin>(`/productos/${id}`, data),
   remove: (id: number) => api.delete(`/productos/${id}`),
-  /** Ajuste de stock justificado (sumar, restar o fijar el conteo físico). */
-  ajustar: (id: number, data: AjusteStockInput) => api.post<AjusteStock>(`/productos/${id}/ajustes`, data),
-  ajustes: (q: Rango & { id_producto?: number; limite?: number } = {}) => api.get<AjusteStock[]>('/productos/ajustes', q),
 }
 
 function formularioImportacion(archivo: File, op: OpcionesImportacion) {
@@ -116,8 +106,11 @@ function formularioImportacion(archivo: File, op: OpcionesImportacion) {
 export const auditoriaApi = {
   list: (f: FiltroAuditoria & { pagina: number; por_pagina: number }) => api.get<PaginaAuditoria>('/auditoria/', f),
   filtros: () => api.get<FiltrosAuditoriaOpciones>('/auditoria/filtros'),
-  /** Registros filtrados para el reporte en PDF (la exportación queda auditada). */
-  exportar: (f: FiltroAuditoria) => api.get<ExportacionAuditoria>('/auditoria/exportar', f),
+  exportar: (formato: 'xlsx' | 'csv', f: FiltroAuditoria) => {
+    const qs = new URLSearchParams({ formato })
+    for (const [k, v] of Object.entries(f)) if (v !== undefined && v !== '') qs.set(k, String(v))
+    return api.blob(`/auditoria/exportar?${qs}`)
+  },
 }
 
 /** Carga masiva desde Excel/CSV: validar (vista previa), estricto (todo o nada) o parcial. */
@@ -139,7 +132,7 @@ export const finanzasApi = {
 }
 
 export const ventasApi = {
-  list: (q: { dia?: string; limite?: number; id_usuario?: number } & Rango = {}) => api.get<Venta[]>('/ventas/', q),
+  list: (q: { dia?: string; limite?: number } & Rango = {}) => api.get<Venta[]>('/ventas/', q),
   get: (id: number) => api.get<Venta>(`/ventas/${id}`),
   create: (data: VentaCreate) => api.post<Venta>('/ventas/', data),
   anular: (id: number) => api.post<Venta>(`/ventas/${id}/anular`),
@@ -173,9 +166,4 @@ export const reportesApi = {
   stockPorCategoria: () => api.get<StockCategoria[]>('/reportes/stock-por-categoria'),
   movimientosStock: (q: Rango = {}) => api.get<MovimientosStock>('/reportes/movimientos-stock', q),
   ventasPorCategoria: (q: Rango = {}) => api.get<VentasCategoria[]>('/reportes/ventas-por-categoria', q),
-  /** Operativos (administrador y gestor): sin utilidad ni márgenes. */
-  resumenGestor: () => api.get<ResumenGestor>('/reportes/gestor/resumen'),
-  ventasDia: (dia: string) => api.get<ReporteVentasDia>('/reportes/ventas', { dia }),
-  movimientos: (q: Rango & { id_producto?: number; limite?: number } = {}) => api.get<Kardex>('/reportes/movimientos', q),
-  cuentasPorPagar: () => api.get<CuentasPorPagar>('/reportes/cuentas-por-pagar'),
 }

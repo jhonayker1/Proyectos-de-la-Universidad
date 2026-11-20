@@ -1,6 +1,6 @@
 import React from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
-import { BarChart2, ClipboardList, LayoutDashboard, Package, PackagePlus, ShieldCheck, ShoppingCart, Tags, Truck, Users } from 'lucide-react'
+import { BarChart2, LayoutDashboard, Package, ShieldCheck, ShoppingCart, Tags, Truck, Users } from 'lucide-react'
 import { homeFor, useAuth } from '@/auth/AuthContext'
 import LoginPage from '@/auth/LoginPage'
 import RecuperarPage from '@/auth/RecuperarPage'
@@ -17,9 +17,6 @@ const Reportes = React.lazy(() => import('@/admin/pages/Reportes'))
 const Proveedores = React.lazy(() => import('@/admin/pages/Proveedores'))
 const Catalogo = React.lazy(() => import('@/admin/pages/Catalogo'))
 const Auditoria = React.lazy(() => import('@/admin/pages/Auditoria'))
-const GestorDashboard = React.lazy(() => import('@/gestor/pages/Dashboard'))
-const GestorEntradas = React.lazy(() => import('@/gestor/pages/Entradas'))
-const GestorReportes = React.lazy(() => import('@/gestor/pages/Reportes'))
 const PuntoVenta = React.lazy(() => import('@/cajero/pages/PuntoVenta'))
 const CajeroInventario = React.lazy(() => import('@/cajero/pages/Inventario'))
 const MisVentas = React.lazy(() => import('@/cajero/pages/MisVentas'))
@@ -33,15 +30,6 @@ const ADMIN_NAV: NavItem[] = [
   { to: 'reportes', label: 'Reportes', icon: BarChart2 },
   { to: 'proveedores', label: 'Proveedores', icon: Truck },
   { to: 'auditoria', label: 'Auditoría', icon: ShieldCheck },
-]
-
-// Gestor (asistente administrativo): supervisión operativa, sin configuración ni finanzas.
-const GESTOR_NAV: NavItem[] = [
-  { to: '', label: 'Inicio', icon: LayoutDashboard },
-  { to: 'inventario', label: 'Inventario', icon: Package },
-  { to: 'entradas', label: 'Entradas y ajustes', icon: PackagePlus },
-  { to: 'proveedores', label: 'Proveedores', icon: Truck },
-  { to: 'reportes', label: 'Reportes', icon: ClipboardList },
 ]
 
 const CAJERO_NAV: NavItem[] = [
@@ -70,16 +58,6 @@ export default function App() {
           <Route path="reportes" element={<Reportes />} />
           <Route path="proveedores" element={<Proveedores />} />
           <Route path="auditoria" element={<Auditoria />} />
-          <Route path="acerca" element={<AcercaDe />} />
-        </Route>
-      </Route>
-      <Route element={<RequireRole rol="gestor" />}>
-        <Route path="/gestor" element={<AppLayout items={GESTOR_NAV} base="/gestor" subtitle="Panel de gestión" />}>
-          <Route index element={<GestorDashboard />} />
-          <Route path="inventario" element={<AdminInventario />} />
-          <Route path="entradas" element={<GestorEntradas />} />
-          <Route path="proveedores" element={<Proveedores />} />
-          <Route path="reportes" element={<GestorReportes />} />
           <Route path="acerca" element={<AcercaDe />} />
         </Route>
       </Route>

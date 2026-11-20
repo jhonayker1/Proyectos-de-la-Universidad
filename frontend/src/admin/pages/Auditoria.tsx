@@ -1,12 +1,12 @@
 /** Bitácora de auditoría: solo consulta y exportación (no se puede editar ni borrar). */
 import React from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import { ChevronDown, FileDown, Lock, Search, X } from 'lucide-react'
+import { ChevronDown, Download, FileSpreadsheet, Lock, Search, X } from 'lucide-react'
+import { saveBlob } from '@/api/client'
 import { auditoriaApi } from '@/api/endpoints'
 import type { FiltroAuditoria, RegistroAuditoria } from '@/api/types'
 import { Badge, EmptyState, ErrorBanner, Pagination, Spinner, cx } from '@/shared/components/ui'
-import { fmtFecha, fmtFechaHora, parseLocal } from '@/shared/lib/dates'
-import { pdfAuditoria } from '@/shared/lib/pdf'
+import { fmtFechaHora } from '@/shared/lib/dates'
 
 const POR_PAGINA = 50
 
@@ -78,7 +78,7 @@ export default function Auditoria() {
   const [texto, setTexto] = React.useState('')
   const [pagina, setPagina] = React.useState(1)
   const [abierto, setAbierto] = React.useState<number | null>(null)
-  const [exportando, setExportando] = React.useState(false)
+  const [exportando, setExportando] = React.useState<'' | 'xlsx' | 'csv'>('')
   const [errorExportar, setErrorExportar] = React.useState<unknown>(null)
 
   // La búsqueda se aplica al dejar de escribir.
@@ -106,29 +106,15 @@ export default function Auditoria() {
   const limpiar = () => { setTexto(''); setFiltro({}) }
   const hayFiltros = Object.values(filtro).some(v => v !== undefined && v !== '')
 
-  /** Los filtros con sus nombres legibles, para el encabezado del PDF. */
-  function describirFiltros() {
-    const o = opciones.data
-    const partes = [
-      filtro.desde && `desde ${fmtFecha(parseLocal(filtro.desde))}`,
-      filtro.hasta && `hasta ${fmtFecha(parseLocal(filtro.hasta))}`,
-      filtro.modulo && `módulo ${o?.modulos.find(m => m.clave === filtro.modulo)?.etiqueta ?? filtro.modulo}`,
-      filtro.accion && `acción ${o?.acciones.find(a => a.clave === filtro.accion)?.etiqueta ?? filtro.accion}`,
-      filtro.id_usuario !== undefined && `usuario ${o?.usuarios.find(u => (u.id_usuario ?? 0) === filtro.id_usuario)?.nombre ?? filtro.id_usuario}`,
-      filtro.buscar && `búsqueda "${filtro.buscar}"`,
-      filtro.id_operacion && 'una sola operación',
-    ].filter(Boolean)
-    return partes.length ? partes.join(' · ') : 'ninguno (todos los registros)'
-  }
-
-  async function exportar() {
-    setExportando(true); setErrorExportar(null)
+  async function exportar(formato: 'xlsx' | 'csv') {
+    setExportando(formato); setErrorExportar(null)
     try {
-      await pdfAuditoria(await auditoriaApi.exportar(filtro), describirFiltros())
+      const fecha = new Date().toISOString().slice(0, 10)
+      saveBlob(await auditoriaApi.exportar(formato, filtro), `auditoria_${fecha}.${formato}`)
     } catch (e) {
       setErrorExportar(e)
     } finally {
-      setExportando(false)
+      setExportando('')
     }
   }
 
@@ -150,10 +136,14 @@ export default function Auditoria() {
               </p>
             </div>
           </div>
-          <button className="btn-primary" disabled={exportando || total === 0} onClick={exportar}
-            title="PDF de solo lectura con los registros que cumplen los filtros (máximo 5000)">
-            <FileDown size={14} /> {exportando ? 'Generando PDF…' : 'Exportar PDF'}
-          </button>
+          <div className="flex gap-2">
+            <button className="btn-muted" disabled={exportando !== '' || total === 0} onClick={() => exportar('xlsx')}>
+              <FileSpreadsheet size={14} /> {exportando === 'xlsx' ? 'Exportando…' : 'Exportar Excel'}
+            </button>
+            <button className="btn-muted" disabled={exportando !== '' || total === 0} onClick={() => exportar('csv')}>
+              <Download size={14} /> {exportando === 'csv' ? 'Exportando…' : 'CSV'}
+            </button>
+          </div>
         </div>
 
         <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-[repeat(5,minmax(0,1fr))_minmax(0,1.6fr)]">

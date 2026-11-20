@@ -3,7 +3,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
-RolKey = Literal["admin", "cashier", "gestor"]
+RolKey = Literal["admin", "cashier"]
 
 
 def check_bcrypt_length(password: str) -> str:

@@ -1,6 +1,5 @@
 from datetime import datetime
 from decimal import Decimal
-from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -77,40 +76,6 @@ class ProductoRead(BaseModel):
     ubicacion: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
-
-
-class AjusteStockCreate(BaseModel):
-    """sumar/restar: cantidad de unidades; conteo: el stock contado (puede ser 0)."""
-
-    tipo: Literal["sumar", "restar", "conteo"]
-    cantidad: int = Field(ge=0, le=1_000_000)
-    motivo: Literal["conteo", "merma", "devolucion", "otro"]
-    observacion: str = Field(min_length=3, max_length=255)
-
-    @model_validator(mode="after")
-    def revisar(self) -> "AjusteStockCreate":
-        self.observacion = " ".join(self.observacion.split())
-        if len(self.observacion) < 3:
-            raise ValueError("Explique el motivo del ajuste (al menos 3 caracteres).")
-        if self.tipo != "conteo" and self.cantidad == 0:
-            raise ValueError("La cantidad a sumar o restar debe ser mayor que 0.")
-        return self
-
-
-class AjusteStockRead(BaseModel):
-    id_ajuste: int
-    id_producto: int
-    sku: str
-    nombre_producto: str
-    cantidad: int
-    stock_anterior: int
-    stock_nuevo: int
-    motivo: str
-    motivo_etiqueta: str
-    observacion: str
-    id_usuario: int
-    nombre_usuario: str
-    fecha: datetime
 
 
 class ProductoAdminRead(ProductoRead):

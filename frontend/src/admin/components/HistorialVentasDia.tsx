@@ -4,23 +4,19 @@ import { Ban, Download } from 'lucide-react'
 import { ventasApi } from '@/api/endpoints'
 import { keys, useApiMutation } from '@/api/queries'
 import type { Venta } from '@/api/types'
-import { usePermisos } from '@/auth/permisos'
 import { useTasas } from '@/shared/components/productos'
 import { Badge, ConfirmDialog, EmptyState, ErrorBanner, QueryState, StatBox, errorText, useToast } from '@/shared/components/ui'
 import { fmtHora, todayIso } from '@/shared/lib/dates'
 import { fmtMoneda, usd } from '@/shared/lib/money'
 import { pdfHistorialDia, totalesVentas } from '@/shared/lib/pdf'
 
-/** idUsuario: solo las ventas de ese cajero. Anular es solo del administrador. */
-export default function HistorialVentasDia({ idUsuario, dia: diaInicial }: { idUsuario?: number; dia?: string } = {}) {
+export default function HistorialVentasDia() {
   const toast = useToast()
-  const { anularVentas } = usePermisos()
   const { tasas } = useTasas()
-  const [dia, setDia] = React.useState(diaInicial ?? todayIso())
-  React.useEffect(() => { if (diaInicial) setDia(diaInicial) }, [diaInicial])
+  const [dia, setDia] = React.useState(todayIso())
   const [pdf, setPdf] = React.useState(false)
   const [anular, setAnular] = React.useState<Venta | null>(null)
-  const ventas = useQuery({ queryKey: [...keys.ventas, 'dia', dia, idUsuario ?? 'todos'], queryFn: () => ventasApi.list({ dia, limite: 1000, id_usuario: idUsuario }) })
+  const ventas = useQuery({ queryKey: [...keys.ventas, 'dia', dia], queryFn: () => ventasApi.list({ dia, limite: 1000 }) })
   const anulacion = useApiMutation((v: Venta) => ventasApi.anular(v.id_venta), [keys.ventas, keys.productos, keys.reportes], v => {
     toast(`Venta ${v.numero_factura} anulada; el stock fue devuelto.`); setAnular(null)
   })
@@ -73,7 +69,7 @@ export default function HistorialVentasDia({ idUsuario, dia: diaInicial }: { idU
                       <td className="td text-[#6366f1]">{v.nombre_usuario}</td>
                       <td className="td"><Badge>{v.estado}</Badge></td>
                       <td className="td">
-                        {anularVentas && v.estado !== 'Anulada' && (
+                        {v.estado !== 'Anulada' && (
                           <button className="btn-muted !px-2.5 !py-1 text-[11px] text-danger" onClick={() => setAnular(v)}><Ban size={12} /> Anular</button>
                         )}
                       </td>

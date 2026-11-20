@@ -1,10 +1,11 @@
+import csv
 import io
 import json
 import logging
 import re
 
 import pytest
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 
 from app.core.config import settings
 from app.models import Auditoria, Proveedor
@@ -195,25 +196,24 @@ def test_api_filtra_pagina_y_es_solo_lectura(client, db_session, admin):
     assert client.get(URL, headers=admin, params={"desde": "2026-02-01", "hasta": "2026-01-01"}).status_code == 422
 
 
-def test_exportar_a_pdf_entrega_los_registros_filtrados_y_queda_registrado(client, db_session, admin, monkeypatch):
-    client.post("/productos/", headers=admin, json={"nombre": "Aceite 5W30", "id_categoria": 1, "precio_usd": "5"})
-    r = client.get(f"{URL}exportar", headers=admin, params={"modulo": "inventario"})
-    assert r.status_code == 200
-    datos = r.json()
-    assert (datos["total"], datos["generado_por"], datos["rol"]) == (1, "admin", "Administrador")
-    assert datos["archivo"].startswith("auditoria_") and datos["archivo"].endswith(".pdf")
-    (fila,) = datos["registros"]
-    assert (fila["modulo_etiqueta"], fila["accion_etiqueta"]) == ("Inventario", "Crear")
-    assert fila["cambios"] and fila["descripcion"].endswith("Aceite 5W30 creado.")
+def test_exportar_excel_y_csv_queda_registrado(client, db_session, admin):
+    client.post("/productos/", headers=admin, json={"nombre": "=HYPERLINK(\"x\")", "id_categoria": 1, "precio_usd": "5"})
+    r = client.get(f"{URL}exportar", headers=admin, params={"formato": "xlsx", "modulo": "inventario"})
+    assert r.status_code == 200 and r.headers["content-type"].startswith("application/vnd.openxml")
+    hoja = load_workbook(io.BytesIO(r.content))["Auditoría"]
+    filas = list(hoja.iter_rows(values_only=True))
+    assert filas[0][:5] == ("Fecha", "Usuario", "Rol", "Módulo", "Acción")
+    assert filas[1][3:5] == ("Inventario", "Crear") and "Nombre: — → =HYPERLINK" in filas[1][9]
+    assert hoja["H2"].data_type == "s"  # la referencia empieza con el SKU, pero ningún texto es fórmula
 
-    (exporte,) = registros(db_session, modulo="auditoria", accion="exportar")
-    assert exporte.descripcion == "Exportación de la auditoría a PDF: 1 registro(s) (modulo=inventario)."
-    assert exporte.referencia == datos["archivo"]
-
-    import app.routers.auditoria as rutas
-    monkeypatch.setattr(rutas, "MAX_EXPORTAR", 1)
-    demasiados = client.get(f"{URL}exportar", headers=admin)
-    assert demasiados.status_code == 413 and "admite hasta 1" in demasiados.json()["detail"]
+    r = client.get(f"{URL}exportar", headers=admin, params={"formato": "csv", "modulo": "inventario"})
+    texto = r.content.decode("utf-8")
+    assert texto.startswith("﻿")
+    filas = list(csv.reader(io.StringIO(texto.lstrip("﻿")), delimiter=";"))
+    assert filas[0][0] == "Fecha" and len(filas) == 2
+    exportes = registros(db_session, modulo="auditoria", accion="exportar")
+    assert [e.referencia.rsplit(".", 1)[1] for e in exportes] == ["xlsx", "csv"]
+    assert "1 registro(s) (modulo=inventario)" in exportes[0].descripcion
 
 
 def test_solo_el_administrador_ve_la_auditoria(client, db_session):

@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 
 from app.core.dependencies import require_roles
 from app.core.money import round_money
-from app.core.permisos import GESTION, SOLO_ADMIN, TODOS
 from app.database.session import get_db
 from app.models.compras import Compra
 from app.models.inventario import PRODUCTO_INACTIVO, Categoria, Marca, Producto, Proveedor
@@ -42,11 +41,7 @@ def build_catalog_router(
     after_update: Callable[[Session, object, dict], None] | None = None,
     before_delete: Callable[[Session, object], None] | None = None,
     before_create: Callable[[Session, dict], None] | None = None,
-    roles_editar: list[str] = SOLO_ADMIN,
-    roles_eliminar: list[str] = SOLO_ADMIN,
 ) -> APIRouter:
-    """roles_editar: quién crea y modifica; roles_eliminar: quién da de baja. Leer lo
-    pueden todos los roles (el cajero y el gestor consultan el catálogo)."""
     router = APIRouter(prefix=prefix, tags=["catalogo"])
     pk = getattr(model, pk_name)
 
@@ -67,7 +62,7 @@ def build_catalog_router(
     def list_items(
         incluir_inactivos: bool = Query(default=False),
         db: Session = Depends(get_db),
-        _: Usuario = Depends(require_roles(TODOS)),
+        _: Usuario = Depends(require_roles(["admin", "cashier"])),
     ):
         query = db.query(model)
         if not incluir_inactivos:
@@ -78,7 +73,7 @@ def build_catalog_router(
     def create_item(
         item_in: create_schema,
         db: Session = Depends(get_db),
-        _: Usuario = Depends(require_roles(roles_editar)),
+        _: Usuario = Depends(require_roles(["admin"])),
     ):
         values = item_in.model_dump()
         values["nombre"] = values["nombre"].strip()
@@ -95,13 +90,10 @@ def build_catalog_router(
         item_id: int,
         item_in: update_schema,
         db: Session = Depends(get_db),
-        user: Usuario = Depends(require_roles(roles_editar)),
+        _: Usuario = Depends(require_roles(["admin"])),
     ):
         item = get_or_404(db, item_id)
         values = item_in.model_dump(exclude_unset=True)
-        # Desactivar por PUT (estado = 0) es una baja: exige el mismo permiso que DELETE.
-        if values.get("estado") is not None and values["estado"] != item.estado and user.rol not in roles_eliminar:
-            raise HTTPException(status_code=403, detail="No tienes permisos para activar o desactivar este registro.")
         for field, value in values.items():
             if value is None and field in required_on_update:
                 raise HTTPException(status_code=422, detail=f"{field} no puede ser null.")
@@ -121,7 +113,7 @@ def build_catalog_router(
     def deactivate_item(
         item_id: int,
         db: Session = Depends(get_db),
-        _: Usuario = Depends(require_roles(roles_eliminar)),
+        _: Usuario = Depends(require_roles(["admin"])),
     ) -> None:
         item = get_or_404(db, item_id)
         if before_delete is not None:
@@ -185,10 +177,8 @@ categorias_router = build_catalog_router(
     before_delete=ensure_category_without_stock,
     before_create=on_category_create,
 )
-# El gestor carga productos, así que puede registrar marcas nuevas (no darlas de baja).
 marcas_router = build_catalog_router(
-    "/marcas", Marca, "id_marca", MarcaCreate, MarcaUpdate, MarcaRead, "Marca",
-    roles_editar=GESTION,
+    "/marcas", Marca, "id_marca", MarcaCreate, MarcaUpdate, MarcaRead, "Marca"
 )
 
 
@@ -215,5 +205,4 @@ proveedores_router = build_catalog_router(
     # RIF, teléfono y correo son obligatorios: al editar no se pueden borrar (null).
     required_on_update=frozenset({"nombre", "estado", "rif", "telefono", "correo"}),
     before_delete=ensure_no_pending_purchases,
-    roles_editar=GESTION,
 )

@@ -1,7 +1,7 @@
 /** Tipos espejo de app/schemas/*. Los Decimal de Python llegan como string ("12.50"). */
 
 export type Money = string
-export type Rol = 'admin' | 'gestor' | 'cashier'
+export type Rol = 'admin' | 'cashier'
 
 export interface Token {
   access_token: string
@@ -60,7 +60,6 @@ export interface Proveedor {
   correo: string | null
   ciudad: string | null
   condiciones: string | null
-  direccion?: string | null
   estado: number
 }
 
@@ -369,97 +368,8 @@ export interface FiltrosAuditoriaOpciones {
   usuarios: { id_usuario: number | null; nombre: string }[]
 }
 
-/** Datos del reporte de auditoría en PDF (máximo 5000 registros). */
-export interface ExportacionAuditoria {
-  generado: string
-  generado_por: string
-  rol: string | null
-  archivo: string
-  total: number
-  registros: RegistroAuditoria[]
-}
-
 /** id_usuario 0 = acciones del sistema (sin usuario). */
 export type FiltroAuditoria = {
   desde?: string; hasta?: string; modulo?: string; accion?: string
   id_usuario?: number; id_operacion?: string; buscar?: string
-}
-/* ---------------- Rol Gestor: ajustes de stock y reportes operativos ---------------- */
-
-export type MotivoAjuste = 'conteo' | 'merma' | 'devolucion' | 'otro'
-
-export interface AjusteStockInput {
-  tipo: 'sumar' | 'restar' | 'conteo'
-  cantidad: number
-  motivo: MotivoAjuste
-  observacion: string
-}
-
-export interface AjusteStock {
-  id_ajuste: number
-  id_producto: number
-  sku: string
-  nombre_producto: string
-  cantidad: number
-  stock_anterior: number
-  stock_nuevo: number
-  motivo: MotivoAjuste
-  motivo_etiqueta: string
-  observacion: string
-  id_usuario: number
-  nombre_usuario: string
-  fecha: string
-}
-
-export interface ResumenGestor {
-  dia: string
-  ventas_hoy: number
-  articulos_hoy: number
-  monto_hoy_usd: Money
-  compras_hoy: number
-  unidades_entrada_hoy: number
-  ajustes_hoy: number
-  productos_bajo_stock: number
-  productos_agotados: number
-  stock_critico: { id_producto: number; sku: string; nombre: string; stock_actual: number; stock_minimo: number; estado: string }[]
-  cuentas_por_pagar_cantidad: number
-  cuentas_por_pagar_usd: Money
-}
-
-export interface MovimientoInventario {
-  fecha: string
-  tipo: 'entrada' | 'salida' | 'devolucion' | 'ajuste'
-  id_producto: number
-  sku: string
-  producto: string
-  cantidad: number
-  referencia: string
-  usuario: string | null
-  detalle: string | null
-}
-
-export interface Kardex {
-  desde: string
-  hasta: string
-  entradas: number
-  salidas: number
-  devoluciones: number
-  ajustes: number
-  movimientos: MovimientoInventario[]
-  truncado: boolean
-}
-
-export interface CuentasPorPagar {
-  total_usd: Money
-  compras: number
-  proveedores: {
-    id_proveedor: number; proveedor: string; rif: string | null; telefono: string | null
-    compras: number; monto_usd: Money; mas_antigua: string
-    detalle: { id_compra: number; numero_factura: string | null; fecha: string; monto_usd: Money; dias: number }[]
-  }[]
-}
-
-export interface ReporteVentasDia extends ResumenVentas {
-  ventas_anuladas: number
-  por_usuario: { id_usuario: number; nombre_completo: string; cantidad_ventas: number; monto_total_usd: Money }[]
 }

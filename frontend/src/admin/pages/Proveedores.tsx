@@ -4,13 +4,12 @@ import { AlertTriangle, ChevronDown, Mail, MapPin, Pencil, Phone, Plus, Search, 
 import { comprasApi, proveedoresApi } from '@/api/endpoints'
 import { keys, useApiMutation, useProductosAdmin, useProveedores } from '@/api/queries'
 import type { Compra, Proveedor } from '@/api/types'
-import { usePermisos } from '@/auth/permisos'
 import { PALETTE } from '@/shared/components/charts'
 import { Badge, ConfirmDialog, EmptyState, ErrorBanner, Field, Modal, Spinner, StatBox, Tabs, cx, errorText, useToast } from '@/shared/components/ui'
 import { parseLocal, todayIso } from '@/shared/lib/dates'
 import { num, parseDecimal, round2, usd } from '@/shared/lib/money'
 
-type FormProv = { nombre: string; rif: string; contacto: string; telefono: string; correo: string; ciudad: string; direccion: string; condiciones: string }
+type FormProv = { nombre: string; rif: string; contacto: string; telefono: string; correo: string; ciudad: string; condiciones: string }
 
 // Mismas reglas que app/schemas/catalogo.py (el backend vuelve a validar).
 const RIF_RE = /^([VEJPGC])[-\s]?(\d{5,9})(?:[-\s]?(\d))?$/
@@ -43,7 +42,7 @@ function ProveedorModal({ proveedor, onClose }: { proveedor: Proveedor | null; o
   const [form, setForm] = React.useState<FormProv>({
     nombre: proveedor?.nombre ?? '', rif: proveedor?.rif ?? '', contacto: proveedor?.contacto ?? '',
     telefono: proveedor?.telefono ?? '', correo: proveedor?.correo ?? '', ciudad: proveedor?.ciudad ?? '',
-    direccion: proveedor?.direccion ?? '', condiciones: proveedor?.condiciones ?? '',
+    condiciones: proveedor?.condiciones ?? '',
   })
   // Los errores se muestran al salir del campo o al intentar guardar, no mientras se escribe.
   const [tocados, setTocados] = React.useState<Partial<Record<keyof FormProv, boolean>>>({})
@@ -92,7 +91,6 @@ function ProveedorModal({ proveedor, onClose }: { proveedor: Proveedor | null; o
         {campo('telefono', 'Teléfono', { placeholder: '0414-555-0141', type: 'tel' })}
         {campo('correo', 'Correo', { placeholder: 'ventas@proveedor.com', type: 'email' })}
         {campo('ciudad', 'Ciudad')}
-        {campo('direccion', 'Dirección', { className: 'col-span-2', placeholder: 'Av. Principal, galpón 4' })}
         {campo('condiciones', 'Condiciones de pago', { placeholder: 'Crédito a 30 días' })}
         <p className="col-span-2 m-0 text-[11px] text-muted-foreground">* Campos obligatorios.</p>
         {intentado && hayErrores && (
@@ -108,7 +106,7 @@ function ProveedorModal({ proveedor, onClose }: { proveedor: Proveedor | null; o
 
 type Linea = { id_producto: string; cantidad: string; costo: string }
 
-export function CompraModal({ proveedor, onClose }: { proveedor: Proveedor; onClose: () => void }) {
+function CompraModal({ proveedor, onClose }: { proveedor: Proveedor; onClose: () => void }) {
   const toast = useToast()
   const productos = useProductosAdmin()
   const [factura, setFactura] = React.useState('')
@@ -178,7 +176,6 @@ export function CompraModal({ proveedor, onClose }: { proveedor: Proveedor; onCl
 
 function HistorialCompras({ compras }: { compras: Compra[] }) {
   const toast = useToast()
-  const { marcarPagos } = usePermisos()
   const pagar = useApiMutation((c: Compra) => comprasApi.setPagado(c.id_compra, !c.pagado), [keys.compras])
   if (compras.length === 0) return <EmptyState title="Sin compras registradas." />
   return (
@@ -190,15 +187,10 @@ function HistorialCompras({ compras }: { compras: Compra[] }) {
             <div className="text-muted-foreground">{parseLocal(c.fecha).toLocaleDateString('es-VE', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
           </div>
           <span className="font-display font-bold">{usd(c.monto_usd)}</span>
-          {marcarPagos ? (
-            <button title={c.pagado ? 'Marcar como pendiente' : 'Marcar como pagada'} className="cursor-pointer border-none bg-transparent p-0"
-              onClick={() => pagar.mutate(c, { onError: e => toast(errorText(e), 'error') })}>
-              <Badge tone={c.pagado ? 'Pagada' : 'Pendiente'}>{c.pagado ? 'Pagada' : 'Pendiente'}</Badge>
-            </button>
-          ) : (
-            // El pago es un movimiento contable: solo el administrador lo registra.
+          <button title={c.pagado ? 'Marcar como pendiente' : 'Marcar como pagada'} className="cursor-pointer border-none bg-transparent p-0"
+            onClick={() => pagar.mutate(c, { onError: e => toast(errorText(e), 'error') })}>
             <Badge tone={c.pagado ? 'Pagada' : 'Pendiente'}>{c.pagado ? 'Pagada' : 'Pendiente'}</Badge>
-          )}
+          </button>
         </div>
       ))}
     </div>
@@ -263,7 +255,6 @@ export default function Proveedores() {
   const [editar, setEditar] = React.useState<{ p: Proveedor | null } | null>(null)
   const [comprar, setComprar] = React.useState<Proveedor | null>(null)
   const [eliminar, setEliminar] = React.useState<Proveedor | null>(null)
-  const permisos = usePermisos()
 
   // La base no guarda categoría del proveedor: se deduce de los productos que suministra.
   const suministros = React.useMemo(() => {
@@ -326,12 +317,10 @@ export default function Proveedores() {
                   <span className="min-w-[90px] text-right"><span className="block text-[11px] text-muted-foreground">Deuda</span><span className={cx('font-display font-bold', deuda > 0 ? 'text-red-600' : 'text-success')}>{usd(deuda)}</span></span>
                   <ChevronDown size={18} className={cx('text-muted-foreground transition-transform', open && 'rotate-180')} />
                 </button>
-                {permisos.eliminarProveedores && (
-                  <button aria-label={`Eliminar ${p.nombre}`} title="Eliminar proveedor" className="btn-icon mr-[18px] !h-8 !w-8 text-danger"
-                    onClick={() => setEliminar(p)}>
-                    <Trash2 size={14} />
-                  </button>
-                )}
+                <button aria-label={`Eliminar ${p.nombre}`} title="Eliminar proveedor" className="btn-icon mr-[18px] !h-8 !w-8 text-danger"
+                  onClick={() => setEliminar(p)}>
+                  <Trash2 size={14} />
+                </button>
               </div>
               {open && (
                 <div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-5 border-t border-border p-[18px]">
@@ -340,7 +329,7 @@ export default function Proveedores() {
                     <div>{p.contacto ?? '—'}</div>
                     {p.telefono && <div className="flex items-center gap-2"><Phone size={14} /> {p.telefono}</div>}
                     {p.correo && <div className="flex items-center gap-2"><Mail size={14} /> {p.correo}</div>}
-                    {(p.direccion || p.ciudad) && <div className="flex items-center gap-2"><MapPin size={14} /> {[p.direccion, p.ciudad].filter(Boolean).join(', ')}</div>}
+                    {p.ciudad && <div className="flex items-center gap-2"><MapPin size={14} /> {p.ciudad}</div>}
                     <div className="mt-2 font-display text-[13px] font-bold">Condiciones</div>
                     <div>{p.condiciones ?? '—'}</div>
                     <div className="mt-2 font-display text-[13px] font-bold">Productos que suministra</div>

@@ -2,8 +2,7 @@
 
 - **Backend** (`app/`): FastAPI sobre la base PostgreSQL existente `cauchos_rey_def`.
 - **Frontend** (`frontend/`): una sola app React (Vite + Tailwind) con login único;
-  según el rol abre el panel de **administrador** (`/admin`), de **gestor** (`/gestor`)
-  o de **cajero** (`/cajero`).
+  según el rol abre el panel de **administrador** (`/admin`) o de **cajero** (`/cajero`).
   Es la adaptación de los diseños de Figma que estaban en `Admin/` y `Cajero/`.
 
 ## Puesta en marcha
@@ -14,19 +13,14 @@
    las migraciones: `002_frontend.sql` (márgenes, datos de proveedor, `compras`,
    `detalles_compra`, `facturas_imagenes`), `003_sku_por_categoria.py` (código de
    cada categoría para el SKU automático; se asigna a partir de los SKU que ya
-   usan sus productos), `004_auditoria.sql` (tabla `auditoria`, de solo lectura) y
-   `005_gestor.sql` (rol Gestor, `ajustes_stock` y `proveedores.direccion`).
+   usan sus productos) y `004_auditoria.sql` (tabla `auditoria`, de solo lectura).
    Solo agregan columnas y tablas, no modifican SKU ni datos existentes, y se pueden
    ejecutar más de una vez, en orden:
    ```
    psql -h localhost -U postgres -d cauchos_rey_def -f migrations/002_frontend.sql
    .\.venv\Scripts\python.exe migrations\003_sku_por_categoria.py
    psql -h localhost -U postgres -d cauchos_rey_def -f migrations/004_auditoria.sql
-   psql -h localhost -U postgres -d cauchos_rey_def -f migrations/005_gestor.sql
    ```
-   Si la base recibió una versión anterior de la 005 (que creaba `clientes` y
-   `presupuestos`), `006_quitar_clientes_presupuestos.sql` retira esas tablas; se
-   detiene sin borrar nada si alguna tiene datos.
    Para una base nueva vacía: `database.sql` y luego las migraciones.
 2. **Backend.** Configure `.env` (ver `.env.example`; `DB_PASSWORD` es la clave
    de `postgres`), instale `pip install -r requirements.txt` e inicie con
@@ -56,10 +50,9 @@ puede entrar, también puede definir `INITIAL_ADMIN_*` para crear un administrad
 
 ## Reglas de negocio
 
-- **Roles:** los registros de `roles` llamados `Administrador`/`Admin`, `Gestor`
-  (también `Asistente administrativo` o `Secretario`) y `Cajero` se reconocen como
-  administrador, gestor y cajero; otros roles no tienen acceso. Desde Usuarios el
-  administrador crea cajeros o gestores (nunca administradores). Ver "Rol Gestor".
+- **Roles:** los registros de `roles` llamados `Administrador`/`Admin` o `Cajero`
+  se reconocen como administrador y cajero; otros roles no tienen acceso. El panel
+  solo crea cajeros.
 - **Bimoneda:** los precios (`precio_usd`) están en USD (`monedas.es_base = 1`).
   El administrador registra la tasa de VES y COP; la vigente es la última con
   `estado = 1` y las anteriores quedan como historial. Cada venta guarda la moneda
@@ -90,39 +83,17 @@ puede entrar, también puede definir `INITIAL_ADMIN_*` para crear un administrad
 | Admin | Catálogo | `GET /categorias?incluir_inactivos=true`, `POST/PUT/DELETE /categorias` (con margen de ganancia), lo mismo para `/marcas`; desactivar es baja lógica (`estado = 0`) y se puede reactivar. Una categoría con productos activos con stock no se puede desactivar (409, por `DELETE` o `PUT` con `estado = 0`) |
 | Admin | Reportes | `/reportes/serie-ventas`, `/reportes/top-productos`, `/reportes/movimientos-stock`, `/reportes/ventas-por-categoria`, `/compras/entradas-recientes`, `/productos/stock-bajo`, `GET /ventas?dia=` y `?desde&hasta`, `POST /ventas/{id}/anular`, `/facturas` |
 | Admin | Proveedores | `GET/POST/PUT /proveedores` (RIF, teléfono y correo obligatorios; el RIF debe empezar con V, E, J, P, G o C y se guarda como `J-12345678-9`), `DELETE /proveedores/{id}` (baja lógica; 409 si tiene compras pendientes de pago), `GET/POST /compras`, `PATCH /compras/{id}/pagado` |
-| Admin | Auditoría | `GET /auditoria/` (filtros `desde`, `hasta`, `modulo`, `accion`, `id_usuario` (0 = sistema), `entidad`, `id_registro`, `id_operacion`, `buscar`; paginado), `GET /auditoria/filtros`, `GET /auditoria/exportar` (mismos filtros, máx. 5000; datos para el reporte en PDF no editable). Solo lectura. Ver "Auditoría" |
-| Gestor | Inicio | `GET /reportes/gestor/resumen` (resumen del día, stock crítico y cuentas por pagar; sin utilidad), `GET /compras/entradas-recientes` |
-| Gestor | Inventario | lo mismo que Admin sin eliminar; `POST /productos/{id}/ajustes` (sumar, restar o conteo físico con motivo y observación), `GET /productos/ajustes` |
-| Gestor | Entradas y ajustes | `GET/POST /compras` (no marca pagos), historial de ajustes, `GET/POST /facturas` (no borra) |
-| Gestor | Reportes | `GET /reportes/movimientos` (kárdex: entradas, salidas, devoluciones y ajustes), `GET /reportes/ventas?dia=` y `GET /ventas?dia=&id_usuario=` (por cajero), `GET /reportes/cuentas-por-pagar`, `GET /auditoria/` (solo módulos operativos) |
+| Admin | Auditoría | `GET /auditoria/` (filtros `desde`, `hasta`, `modulo`, `accion`, `id_usuario` (0 = sistema), `entidad`, `id_registro`, `id_operacion`, `buscar`; paginado), `GET /auditoria/filtros`, `GET /auditoria/exportar?formato=xlsx\|csv` (mismos filtros, máx. 100 000). Solo lectura. Ver "Auditoría" |
 | Cajero | Punto de venta | `GET /ventas/mi-resumen`, `GET /tasas/vigente`, `GET /monedas`, `POST /ventas`, `GET /ventas?dia=` |
 | Cajero | Inventario | `GET /productos` (solo lectura; agregar al ticket) |
 | Cajero | Mis ventas | `GET /ventas?dia=` y `?desde&hasta` (el backend solo devuelve las propias) |
-
-## Rol Gestor (asistente administrativo)
-
-Se ubica entre el administrador y el cajero. Los permisos están en
-`app/core/permisos.py` (`SOLO_ADMIN`, `GESTION`, `TODOS`, `CAJA`) y el backend los
-aplica en cada endpoint; el frontend solo oculta botones (`frontend/src/auth/permisos.ts`).
-
-- **Puede:** consultar, crear y editar productos (también importar desde Excel) y
-  marcas; registrar compras a proveedores (entradas) y ajustes de stock justificados;
-  crear, editar y buscar proveedores; ver precios en USD, Bs y COP; ver ventas de todos los cajeros, movimientos de inventario, cuentas por pagar y la
-  auditoría de los módulos operativos.
-- **No puede:** usuarios, tasas de cambio, categorías y márgenes (configuración); el
-  dashboard financiero (ventas del mes contra el anterior, valor del inventario) ni
-  ningún reporte de utilidad; eliminar productos, marcas, proveedores o facturas
-  escaneadas; marcar compras como pagadas; anular ventas (facturas cerradas).
-- **Ajustes de stock:** nunca dejan el stock negativo, exigen motivo (conteo físico,
-  daño o merma, devolución, otro) y observación, y quedan en la auditoría.
-- Cuentas por cobrar no aplica: todas las ventas se cobran al momento.
 
 ## Auditoría
 
 `app/services/auditoria_service.py` registra **automáticamente**, con eventos del ORM,
 cada alta, cambio o baja de productos, categorías, marcas, proveedores, usuarios,
-tasas, ventas, compras, facturas escaneadas y ajustes de stock, sin depender de que
-cada endpoint lo haga. Cada registro guarda la fecha, el usuario (nombre y rol de ese momento), el
+tasas, ventas, compras y facturas escaneadas, sin depender de que cada endpoint lo
+haga. Cada registro guarda la fecha, el usuario (nombre y rol de ese momento), el
 módulo, la acción, una descripción legible ("Producto LUB-28 · Aceite: precio venta
 USD 12.00 → 14.50"), el detalle campo por campo con el antes y el después (las llaves
 foráneas con su nombre, no el ID), el origen ("Venta en punto de venta", "Importación
@@ -135,11 +106,7 @@ cambió en una misma petición (una venta y los movimientos de stock que causó)
 - Las **contraseñas nunca se guardan** (ni su hash): solo "contraseña cambiada".
 - Acciones: crear, modificar, eliminar, desactivar, reactivar, movimiento de stock,
   cambio de contraseña, anular, cambio de pago, importar y exportar (las exportaciones
-  de la auditoría también quedan registradas).
-- **Exportación en PDF no editable:** el botón "Exportar PDF" arma en el navegador un
-  reporte con los filtros aplicados (máximo 5000 registros), con el mismo diseño de los
-  demás reportes. El PDF va cifrado con permiso solo de impresión: no se puede editar,
-  copiar ni anotar (la clave de propietario es aleatoria y no se guarda). También se registran los cambios hechos
+  de la auditoría también quedan registradas). También se registran los cambios hechos
   por `reset_password.py` y la recuperación de contraseña con código.
 - **Solo lectura:** la API no tiene rutas para editar ni borrar, y en PostgreSQL un
   trigger rechaza `UPDATE`, `DELETE` y `TRUNCATE` sobre la tabla. No usa llave foránea

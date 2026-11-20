@@ -27,7 +27,6 @@ def db_session():
         [
             Rol(id_rol=1, nombre="Administrador", estado=1),
             Rol(id_rol=2, nombre="Cajero", estado=1),
-            Rol(id_rol=3, nombre="Gestor", estado=1),
             Moneda(id_moneda=1, codigo="USD", nombre="Dólar", simbolo="$", es_base=1, estado=1),
             Moneda(id_moneda=2, codigo="VES", nombre="Bolívar", simbolo="Bs", es_base=0, estado=1),
             Categoria(id_categoria=1, nombre="Cauchos", estado=1),
@@ -73,10 +72,6 @@ def add_admin(db_session, correo: str = "admin@test.com") -> Usuario:
 
 def add_cashier(db_session, correo: str = "cajero@test.com") -> Usuario:
     return add_user(db_session, correo, id_rol=2)
-
-
-def add_gestor(db_session, correo: str = "gestor@test.com") -> Usuario:
-    return add_user(db_session, correo, id_rol=3)
 
 
 def auth_header(client, correo: str) -> dict[str, str]:

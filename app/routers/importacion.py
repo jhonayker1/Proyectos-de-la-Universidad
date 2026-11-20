@@ -18,7 +18,6 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.dependencies import require_roles
-from app.core.permisos import GESTION
 from app.database.session import get_db
 from app.models.usuarios import Usuario
 from app.schemas.importacion import CampoImportable, ErrorImportacion, ResultadoImportacion
@@ -31,7 +30,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/productos/importar",
     tags=["importación de inventario"],
-    dependencies=[Depends(require_roles(GESTION))],
+    dependencies=[Depends(require_roles(["admin"]))],
 )
 
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
@@ -116,7 +115,7 @@ def import_inventory(
     ),
     formato: Literal["json", "xlsx"] = Form("json", description="xlsx devuelve el reporte de errores en Excel."),
     db: Session = Depends(get_db),
-    admin: Usuario = Depends(require_roles(GESTION)),
+    admin: Usuario = Depends(require_roles(["admin"])),
 ):
     nombre = archivo.filename or "archivo"
     extension = Path(nombre).suffix.lower()
@@ -174,7 +173,7 @@ def import_inventory(
 @router.get("/reportes/{reporte_id}", response_class=Response, responses={200: {"content": {XLSX: {}}}})
 def download_report(
     reporte_id: str,
-    admin: Usuario = Depends(require_roles(GESTION)),
+    admin: Usuario = Depends(require_roles(["admin"])),
 ) -> Response:
     """Reporte de errores (.xlsx) de una importación hecha por el mismo usuario en las
     últimas 24 horas."""

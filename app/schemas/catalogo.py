@@ -100,7 +100,6 @@ class ProveedorBase(BaseModel):
     contacto: str | None = Field(default=None, max_length=100)
     ciudad: str | None = Field(default=None, max_length=60)
     condiciones: str | None = Field(default=None, max_length=120)
-    direccion: str | None = Field(default=None, max_length=200)
 
 
 class ProveedorCreate(ProveedorBase):
@@ -142,7 +141,6 @@ class ProveedorRead(BaseModel):
     correo: str | None
     ciudad: str | None
     condiciones: str | None
-    direccion: str | None = None
     estado: int
 
     model_config = ConfigDict(from_attributes=True)

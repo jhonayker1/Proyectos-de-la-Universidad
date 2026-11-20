@@ -44,7 +44,6 @@ class Proveedor(Base):
     correo = Column(String(100), nullable=True)
     ciudad = Column(String(60), nullable=True)
     condiciones = Column(String(120), nullable=True)
-    direccion = Column(String(200), nullable=True)  # migración 005
 
 
 class Producto(Base):
@@ -88,30 +87,3 @@ class Producto(Base):
             self.estado = PRODUCTO_BAJO_STOCK
         else:
             self.estado = PRODUCTO_DISPONIBLE
-
-
-MOTIVOS_AJUSTE = {
-    "conteo": "Conteo físico",
-    "merma": "Daño o merma",
-    "devolucion": "Devolución",
-    "otro": "Otro",
-}
-
-
-class AjusteStock(Base):
-    """Corrección manual de stock con su justificación (migración 005)."""
-
-    __tablename__ = "ajustes_stock"
-
-    id_ajuste = Column(Integer, primary_key=True)
-    id_producto = Column(Integer, ForeignKey("productos.id_producto"), nullable=False)
-    cantidad = Column(Integer, nullable=False)  # positivo suma, negativo resta
-    stock_anterior = Column(Integer, nullable=False)
-    stock_nuevo = Column(Integer, nullable=False)
-    motivo = Column(String(30), nullable=False)
-    observacion = Column(String(255), nullable=False)
-    id_usuario = Column(Integer, ForeignKey("usuarios.id_usuario"), nullable=False)
-    fecha = Column(DateTime, nullable=False, default=local_now)
-
-    producto = relationship("Producto", lazy="joined")
-    usuario = relationship("Usuario", lazy="joined")

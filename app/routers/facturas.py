@@ -11,7 +11,6 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.dates import day_bounds
 from app.core.dependencies import require_roles
-from app.core.permisos import GESTION, SOLO_ADMIN
 from app.database.session import get_db
 from app.models.compras import Compra, FacturaImagen
 from app.models.usuarios import Usuario
@@ -20,7 +19,7 @@ from app.schemas.compras import FacturaRead
 router = APIRouter(
     prefix="/facturas",
     tags=["facturas"],
-    dependencies=[Depends(require_roles(GESTION))],
+    dependencies=[Depends(require_roles(["admin"]))],
 )
 
 # Tipo permitido -> (extensión, firma de los primeros bytes)
@@ -50,7 +49,7 @@ async def upload_invoice(
     archivo: UploadFile = File(...),
     id_compra: int | None = Form(default=None),
     db: Session = Depends(get_db),
-    admin: Usuario = Depends(require_roles(GESTION)),
+    admin: Usuario = Depends(require_roles(["admin"])),
 ) -> FacturaImagen:
     allowed = ALLOWED_TYPES.get(archivo.content_type or "")
     if allowed is None:
@@ -111,10 +110,7 @@ def download_invoice(id_factura_img: int, db: Session = Depends(get_db)) -> File
     return FileResponse(path, media_type=factura.tipo_mime, filename=factura.nombre_original)
 
 
-@router.delete(
-    "/{id_factura_img}", status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_roles(SOLO_ADMIN))],  # borrar un respaldo es irreversible
-)
+@router.delete("/{id_factura_img}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_invoice(id_factura_img: int, db: Session = Depends(get_db)) -> None:
     factura = get_or_404(db, id_factura_img)
     path = facturas_dir() / Path(factura.ruta_archivo).name

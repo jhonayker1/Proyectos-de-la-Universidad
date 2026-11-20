@@ -13,7 +13,6 @@ from app.core.dependencies import require_roles
 from app.core.money import round_money, to_local
 from app.database.session import get_db
 from app.models.finanzas import Moneda
-from app.core.permisos import CAJA, SOLO_ADMIN, TODOS
 from app.models.inventario import Producto
 from app.models.usuarios import Usuario
 from app.models.ventas import VENTA_ANULADA, VENTA_COMPLETADA, DetalleVenta, Venta
@@ -119,7 +118,7 @@ def build_summary(db: Session, day: date, id_usuario: int | None = None) -> Resu
 def create_sale(
     venta_in: VentaCreate,
     db: Session = Depends(get_db),
-    vendedor: Usuario = Depends(require_roles(CAJA)),
+    vendedor: Usuario = Depends(require_roles(["admin", "cashier"])),
 ) -> VentaRead:
     establecer_origen(db, "Venta en punto de venta")
     moneda = get_moneda(db, venta_in.codigo_moneda_pago)
@@ -186,16 +185,12 @@ def list_sales(
     desde: date | None = Query(default=None, description="Inicio del rango (incluido)."),
     hasta: date | None = Query(default=None, description="Fin del rango (incluido)."),
     limite: int = Query(default=100, ge=1, le=5000),
-    id_usuario: int | None = Query(default=None, description="Solo admin y gestor: ventas de un cajero."),
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(require_roles(TODOS)),
+    current_user: Usuario = Depends(require_roles(["admin", "cashier"])),
 ) -> list[VentaRead]:
-    """El cajero ve solo sus ventas; el administrador y el gestor, todas o las de un cajero."""
     query = db.query(Venta)
     if current_user.rol == "cashier":
         query = query.filter(Venta.id_usuario == current_user.id_usuario)
-    elif id_usuario is not None:
-        query = query.filter(Venta.id_usuario == id_usuario)
     if dia is not None:
         query = filter_by_day(query, dia)
     if desde is not None or hasta is not None:
@@ -207,7 +202,7 @@ def list_sales(
 def my_daily_summary(
     dia: date = Query(default_factory=local_today),
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(require_roles(CAJA)),
+    current_user: Usuario = Depends(require_roles(["admin", "cashier"])),
 ) -> ResumenVentas:
     """Corte diario de las ventas registradas por el usuario autenticado."""
     return build_summary(db, dia, current_user.id_usuario)
@@ -217,7 +212,7 @@ def my_daily_summary(
 def get_sale(
     id_venta: int,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(require_roles(TODOS)),
+    current_user: Usuario = Depends(require_roles(["admin", "cashier"])),
 ) -> VentaRead:
     venta = db.query(Venta).filter(Venta.id_venta == id_venta).first()
     if venta is None or (
@@ -231,7 +226,7 @@ def get_sale(
 def cancel_sale(
     id_venta: int,
     db: Session = Depends(get_db),
-    _: Usuario = Depends(require_roles(SOLO_ADMIN)),
+    _: Usuario = Depends(require_roles(["admin"])),
 ) -> VentaRead:
     """Anula la venta y devuelve las cantidades vendidas al inventario."""
     venta = (

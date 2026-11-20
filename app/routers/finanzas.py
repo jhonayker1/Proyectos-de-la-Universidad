@@ -3,7 +3,6 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.dependencies import require_roles
-from app.core.permisos import GESTION, SOLO_ADMIN, TODOS
 from app.database.session import get_db
 from app.models.finanzas import Moneda, TasaCambio
 from app.models.usuarios import Usuario
@@ -29,7 +28,7 @@ def to_read(tasa: TasaCambio) -> TasaCambioRead:
 @monedas_router.get("/", response_model=list[MonedaRead])
 def list_currencies(
     db: Session = Depends(get_db),
-    _: Usuario = Depends(require_roles(TODOS)),
+    _: Usuario = Depends(require_roles(["admin", "cashier"])),
 ) -> list[Moneda]:
     return db.query(Moneda).filter(Moneda.estado == 1).order_by(Moneda.id_moneda).all()
 
@@ -38,7 +37,7 @@ def list_currencies(
 def current_rate(
     codigo_moneda: str = Query(default=settings.LOCAL_CURRENCY, min_length=3, max_length=3),
     db: Session = Depends(get_db),
-    _: Usuario = Depends(require_roles(TODOS)),
+    _: Usuario = Depends(require_roles(["admin", "cashier"])),
 ) -> TasaCambioRead:
     return to_read(require_tasa_vigente(db, get_moneda(db, codigo_moneda)))
 
@@ -48,7 +47,7 @@ def rate_history(
     codigo_moneda: str | None = Query(default=None, min_length=3, max_length=3),
     limite: int = Query(default=50, ge=1, le=500),
     db: Session = Depends(get_db),
-    _: Usuario = Depends(require_roles(GESTION)),
+    _: Usuario = Depends(require_roles(["admin"])),
 ) -> list[TasaCambioRead]:
     query = db.query(TasaCambio)
     if codigo_moneda:
@@ -60,7 +59,7 @@ def rate_history(
 def set_rate(
     tasa_in: TasaCambioCreate,
     db: Session = Depends(get_db),
-    _: Usuario = Depends(require_roles(SOLO_ADMIN)),
+    _: Usuario = Depends(require_roles(["admin"])),
 ) -> TasaCambioRead:
     """Registra una tasa nueva; las anteriores de esa moneda quedan con estado = 0."""
     moneda = get_moneda(db, tasa_in.codigo_moneda)

@@ -147,15 +147,13 @@ function VentasHoy() {
   )
 }
 
-type FormUsuario = { nombre_completo: string; correo: string; password: string; telefono: string; permisos: string; rol: 'cashier' | 'gestor' }
-
-export const ROL_ETIQUETA: Record<string, string> = { admin: 'Administrador', gestor: 'Gestor', cashier: 'Cajero' }
+type FormUsuario = { nombre_completo: string; correo: string; password: string; telefono: string; permisos: string }
 
 function UsuarioModal({ editar, onClose }: { editar: Usuario | null; onClose: () => void }) {
   const toast = useToast()
   const [form, setForm] = React.useState<FormUsuario>({
     nombre_completo: editar?.nombre_completo ?? '', correo: editar?.correo ?? '', password: '',
-    telefono: editar?.telefono ?? '', permisos: editar?.permisos ?? '', rol: 'cashier',
+    telefono: editar?.telefono ?? '', permisos: editar?.permisos ?? '',
   })
   const set = (k: keyof FormUsuario) => (e: React.ChangeEvent<HTMLInputElement>) => setForm(f => ({ ...f, [k]: e.target.value }))
   const guardar = useApiMutation(async () => {
@@ -163,11 +161,11 @@ function UsuarioModal({ editar, onClose }: { editar: Usuario | null; onClose: ()
       nombre_completo: form.nombre_completo.trim(), correo: form.correo.trim(),
       telefono: form.telefono.trim() || null, permisos: form.permisos.trim() || null,
     }
-    return editar ? usuariosApi.update(editar.id_usuario, base) : usuariosApi.create({ ...base, password: form.password, rol: form.rol })
-  }, [keys.usuarios], () => { toast(editar ? 'Usuario actualizado.' : `${ROL_ETIQUETA[form.rol]} creado.`); onClose() })
+    return editar ? usuariosApi.update(editar.id_usuario, base) : usuariosApi.create({ ...base, password: form.password, rol: 'cashier' })
+  }, [keys.usuarios], () => { toast(editar ? 'Usuario actualizado.' : 'Cajero creado.'); onClose() })
   const invalido = form.nombre_completo.trim().length < 3 || !form.correo.includes('@') || (!editar && form.password.length < 8)
   return (
-    <Modal title={editar ? 'Editar usuario' : 'Nuevo usuario'} onClose={onClose} footer={<>
+    <Modal title={editar ? 'Editar usuario' : 'Nuevo cajero'} onClose={onClose} footer={<>
       <button className="btn-muted" onClick={onClose}>Cancelar</button>
       <button className="btn-primary" disabled={invalido || guardar.isPending} onClick={() => guardar.mutate(undefined)}>
         {guardar.isPending ? 'Guardando...' : 'Guardar'}
@@ -184,15 +182,11 @@ function UsuarioModal({ editar, onClose }: { editar: Usuario | null; onClose: ()
         )}
         <Field label="Teléfono"><input className="input" value={form.telefono} onChange={set('telefono')} /></Field>
         <Field label="Permisos (descripción)"><input className="input" placeholder="Ventas, apertura de caja..." value={form.permisos} onChange={set('permisos')} /></Field>
-        {/* Desde la pantalla se crean cajeros o gestores, nunca administradores; el rol no cambia al editar. */}
-        <Field label="Rol" hint={editar ? undefined : form.rol === 'gestor'
-          ? 'Gestor: inventario, entradas y ajustes, proveedores y reportes operativos. Sin usuarios, tasas ni reportes financieros.'
-          : 'Cajero: punto de venta, consulta de inventario y sus propias ventas.'}>
-          <select className="input" disabled={Boolean(editar)} value={editar?.rol ?? form.rol}
-            onChange={e => setForm(f => ({ ...f, rol: e.target.value as FormUsuario['rol'] }))}>
+        {/* Solo se crean cajeros (plans/limitar-creacion-usuarios-a-cajeros.md). */}
+        <Field label="Rol">
+          <select className="input" disabled value={editar?.rol ?? 'cashier'}>
             <option value="cashier">Cajero</option>
-            <option value="gestor">Gestor (asistente administrativo)</option>
-            {editar?.rol === 'admin' && <option value="admin">Administrador</option>}
+            <option value="admin">Administrador</option>
           </select>
         </Field>
         {guardar.error && <ErrorBanner error={guardar.error} />}
@@ -233,7 +227,7 @@ function UserCard({ u, esYo, onEdit, onReset, onToggle, onDelete }: {
   u: Usuario; esYo: boolean; onEdit: () => void; onReset: () => void; onToggle: () => void; onDelete: () => void
 }) {
   const activo = u.estado === 1
-  const rol = ROL_ETIQUETA[u.rol ?? ''] ?? 'Sin rol'
+  const rol = u.rol === 'admin' ? 'Administrador' : 'Cajero'
   const color = colorDe(u.id_usuario)
   return (
     <div className="card flex flex-col gap-3.5 p-5">
@@ -289,7 +283,7 @@ export default function Usuarios() {
         <TasaCard codigo="COP" titulo="Pesos por Dólar" />
         <MargenCard />
         <button className="btn-primary ml-auto !px-[18px] !py-2.5 shadow-md" onClick={() => setModal({ editar: null })}>
-          <Plus size={15} /> Nuevo usuario
+          <Plus size={15} /> Nuevo Cajero
         </button>
       </div>
 
