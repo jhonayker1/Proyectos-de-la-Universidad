@@ -102,11 +102,11 @@ async function request<T>(method: string, path: string, opts: { query?: Query; b
   return data as T
 }
 
-async function fetchBlob(path: string): Promise<Blob> {
+async function fetchBlob(path: string, query?: Query): Promise<Blob> {
   const token = getToken()
   let res: Response
   try {
-    res = await fetch(buildUrl(path), { headers: token ? { Authorization: `Bearer ${token}` } : {} })
+    res = await fetch(buildUrl(path, query), { headers: token ? { Authorization: `Bearer ${token}` } : {} })
   } catch {
     throw new ApiError(0, SIN_CONEXION)
   }
@@ -126,17 +126,5 @@ export const api = {
   patch: <T>(path: string, body?: unknown) => request<T>('PATCH', path, { body }),
   delete: <T = void>(path: string) => request<T>('DELETE', path),
   /** Descarga un archivo protegido (p. ej. una factura) como Blob. */
-  blob: (path: string) => fetchBlob(path),
-}
-
-/** Guarda un Blob en la computadora del usuario con el nombre indicado. */
-export function saveBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  setTimeout(() => URL.revokeObjectURL(url), 1000)
+  blob: (path: string, query?: Query) => fetchBlob(path, query),
 }

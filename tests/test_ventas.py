@@ -118,14 +118,6 @@ def test_stock_status_follows_sales_and_cancellations(client, db_session):
     db_session.expire_all()
     assert db_session.get(Producto, producto.id_producto).estado == "Disponible"
 
-    client.delete(f"/productos/{producto.id_producto}", headers=admin)
-    assert client.get(f"/productos/{producto.id_producto}", headers=admin).status_code == 404
-    reactivado = client.put(
-        f"/productos/{producto.id_producto}", headers=admin, json={"estado": "Disponible"}
-    )
-    assert reactivado.json()["estado"] == "Disponible"
-
-
 def test_sale_in_bolivares_requires_rate(client, db_session):
     add_cashier(db_session)
     cajero = auth_header(client, "cajero@test.com")

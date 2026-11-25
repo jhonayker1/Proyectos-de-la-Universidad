@@ -2,7 +2,8 @@
 
 - **Backend** (`app/`): FastAPI sobre la base PostgreSQL existente `cauchos_rey_def`.
 - **Frontend** (`frontend/`): una sola app React (Vite + Tailwind) con login único;
-  según el rol abre el panel de **administrador** (`/admin`) o de **cajero** (`/cajero`).
+  según el rol abre el panel de **administrador** (`/admin`), **gestor** (`/gestor`)
+  o **cajero** (`/cajero`).
   Es la adaptación de los diseños de Figma que estaban en `Admin/` y `Cajero/`.
 
 ## Puesta en marcha
@@ -13,13 +14,19 @@
    las migraciones: `002_frontend.sql` (márgenes, datos de proveedor, `compras`,
    `detalles_compra`, `facturas_imagenes`), `003_sku_por_categoria.py` (código de
    cada categoría para el SKU automático; se asigna a partir de los SKU que ya
-   usan sus productos) y `004_auditoria.sql` (tabla `auditoria`, de solo lectura).
-   Solo agregan columnas y tablas, no modifican SKU ni datos existentes, y se pueden
-   ejecutar más de una vez, en orden:
+   usan sus productos), `004_auditoria.sql` (tabla `auditoria`, de solo lectura) y
+   `005_baja_logica.sql` (marcas de eliminación, índice parcial de SKU y protección
+   contra borrados físicos) y `006_gestor.sql` (rol Gestor, dirección de proveedor
+   y bitácora de ajustes de stock).
+   Las migraciones 002–004 agregan el esquema de frontend y auditoría; la 005 añade
+   bajas lógicas y adapta los SKU con sufijo creados por la versión previa. Son
+   idempotentes y se deben ejecutar en orden:
    ```
    psql -h localhost -U postgres -d cauchos_rey_def -f migrations/002_frontend.sql
    .\.venv\Scripts\python.exe migrations\003_sku_por_categoria.py
    psql -h localhost -U postgres -d cauchos_rey_def -f migrations/004_auditoria.sql
+   psql -h localhost -U postgres -d cauchos_rey_def -f migrations/005_baja_logica.sql
+   psql -h localhost -U postgres -d cauchos_rey_def -f migrations/006_gestor.sql
    ```
    Para una base nueva vacía: `database.sql` y luego las migraciones.
 2. **Backend.** Configure `.env` (ver `.env.example`; `DB_PASSWORD` es la clave
@@ -50,9 +57,11 @@ puede entrar, también puede definir `INITIAL_ADMIN_*` para crear un administrad
 
 ## Reglas de negocio
 
-- **Roles:** los registros de `roles` llamados `Administrador`/`Admin` o `Cajero`
-  se reconocen como administrador y cajero; otros roles no tienen acceso. El panel
-  solo crea cajeros.
+- **Roles:** `Administrador`/`Admin`, `Cajero` y `Gestor` (también conocido como
+  `Asistente administrativo` o `Secretario`) habilitan sus paneles respectivos.
+  El gestor supervisa inventario, registra compras y ajustes justificados, administra
+  proveedores y consulta reportes operativos; no administra usuarios, tasas, márgenes,
+  pagos ni acciones de archivado/restauración.
 - **Bimoneda:** los precios (`precio_usd`) están en USD (`monedas.es_base = 1`).
   El administrador registra la tasa de VES y COP; la vigente es la última con
   `estado = 1` y las anteriores quedan como historial. Cada venta guarda la moneda
@@ -65,9 +74,27 @@ puede entrar, también puede definir `INITIAL_ADMIN_*` para crear un administrad
 - **Stock:** se valida y descuenta en la transacción de la venta (con bloqueo de
   filas). Registrar una compra a proveedor suma stock y, opcionalmente, actualiza
   el costo. El estado se recalcula solo: `Agotado` (sin stock), `Bajo Stock`
-  (debajo del mínimo) o `Disponible`. Anular una venta devuelve el stock.
+  (debajo del mínimo) o `Disponible`. Los ajustes manuales requieren tipo, motivo y
+  observación; el gestor no puede cambiar el stock directamente. Anular una venta devuelve el stock. Archivar un
+  producto no cambia su stock ni borra sus movimientos; deja de estar disponible para
+  operaciones y métricas del inventario hasta que se restaure.
+- **Bajas lógicas:** productos, usuarios y facturas escaneadas conservan su fila,
+  relaciones e historial. Los SKU quedan reutilizables tras archivar; la restauración
+  devuelve conflicto si otro producto activo ya usa ese SKU. El correo de usuario
+  conserva unicidad global. Las categorías, marcas y proveedores mantienen su baja
+  lógica actual mediante `estado = 0`.
 - **Facturas escaneadas:** JPG, PNG, WEBP o PDF de hasta `MAX_UPLOAD_MB` (10 MB),
-  guardadas en `UPLOAD_DIR` (por defecto `uploads/`, fuera de git).
+  guardadas en `UPLOAD_DIR` (por defecto `uploads/`, fuera de git). Al archivarlas se
+  conserva el archivo en disco; restaurarlas requiere que el archivo siga disponible.
+- **Descargas de la aplicación:** los PDF, CSV y Excel se guardan en la carpeta elegida
+  desde «Carpeta de descargas» en el menú lateral. Elige cualquier carpeta existente;
+  la aplicación no crea subcarpetas. La aplicación confirma cada archivo en pantalla;
+  las escrituras directas no aparecen en la lista de descargas de Edge. Si no se ha
+  elegido carpeta (por ejemplo, en una vista integrada que no comparte permisos),
+  se solicita una descarga normal al navegador, sujeta a las restricciones de la vista
+  integrada. La selección de carpeta requiere un navegador compatible con File System
+  Access API y un origen seguro (HTTPS o localhost); el permiso queda asociado al perfil
+  del navegador.
 - El número de factura de venta es `F-00000001`, a partir de `id_venta`.
 - `TIMEZONE` (`America/Caracas`) es la hora con la que se guardan las fechas y se
   delimitan los días de los reportes.
@@ -77,13 +104,18 @@ puede entrar, también puede definir `INITIAL_ADMIN_*` para crear un administrad
 | Panel | Pantalla | Endpoints |
 |---|---|---|
 | Admin | Inicio | `GET /reportes/dashboard`, `/reportes/top-productos`, `/reportes/stock-por-categoria` |
-| Admin | Usuarios | `GET/POST /usuarios`, `PUT /usuarios/{id}`, `PATCH /usuarios/{id}/estado`, `PATCH /usuarios/{id}/password`, `DELETE /usuarios/{id}` (solo sin historial); tasas `GET /tasas/vigente`, `POST /tasas`; márgenes `GET/PUT /categorias` |
-| Admin | Inventario | `GET /productos/admin` (sin los eliminados; `?incluir_eliminados=true` para verlos), `POST/PUT /productos` (al crear sin `sku`, se genera el siguiente de la categoría: `LUB-27` → `LUB-28`, con el mismo ancho de número; las categorías sin productos empiezan en `XXX-0001`; nunca repite un SKU), `GET /productos/siguiente-sku?id_categoria=` (vista previa), `DELETE /productos/{id}`: elimina el producto de la lista; si no tiene ventas ni compras se borra de la base, y si tiene historial se oculta (estado `Inactivo`) para conservar facturas y reportes y su SKU queda libre (`SKU~id`). También usa `/categorias`, `/marcas`, `/proveedores` |
+| Admin | Usuarios | `GET/POST /usuarios` (`?incluir_eliminados=true` para archivados), `PUT /usuarios/{id}`, `PATCH /usuarios/{id}/estado`, `PATCH /usuarios/{id}/password`, `DELETE /usuarios/{id}` (baja lógica), `POST /usuarios/{id}/restaurar`; tasas `GET /tasas/vigente`, `POST /tasas`; márgenes `GET/PUT /categorias` |
+| Admin | Inventario | `GET /productos/admin` (sin archivados ni inactivos; `?incluir_eliminados=true` para verlos), `POST/PUT /productos` (al crear sin `sku`, se genera el siguiente de la categoría: `LUB-27` → `LUB-28`, con el mismo ancho de número; los SKU archivados no reinician la secuencia), `GET /productos/siguiente-sku?id_categoria=` (vista previa), `DELETE /productos/{id}` archiva sin cambiar SKU, stock ni historial, `POST /productos/{id}/restaurar` restaura si el SKU está libre. También usa `/categorias`, `/marcas`, `/proveedores` |
 | Admin | Inventario → Importar Excel | `POST /productos/importar` (multipart: `archivo`, `modo`, `si_existe`, `crear_faltantes`, `id_categoria_defecto`, `hoja`, `mapeo`, `formato`), `GET /productos/importar/reportes/{id}`, `GET /productos/importar/plantilla`, `GET /productos/importar/campos`. Ver "Carga masiva de inventario" |
 | Admin | Catálogo | `GET /categorias?incluir_inactivos=true`, `POST/PUT/DELETE /categorias` (con margen de ganancia), lo mismo para `/marcas`; desactivar es baja lógica (`estado = 0`) y se puede reactivar. Una categoría con productos activos con stock no se puede desactivar (409, por `DELETE` o `PUT` con `estado = 0`) |
-| Admin | Reportes | `/reportes/serie-ventas`, `/reportes/top-productos`, `/reportes/movimientos-stock`, `/reportes/ventas-por-categoria`, `/compras/entradas-recientes`, `/productos/stock-bajo`, `GET /ventas?dia=` y `?desde&hasta`, `POST /ventas/{id}/anular`, `/facturas` |
+| Admin | Reportes | `/reportes/serie-ventas`, `/reportes/top-productos`, `/reportes/movimientos-stock`, `/reportes/ventas-por-categoria`, `/compras/entradas-recientes`, `/productos/stock-bajo`, `GET /ventas?dia=` y `?desde&hasta`, `POST /ventas/{id}/anular`, `/facturas` (`?incluir_eliminadas=true` para archivadas; `POST /facturas/{id}/restaurar`) |
 | Admin | Proveedores | `GET/POST/PUT /proveedores` (RIF, teléfono y correo obligatorios; el RIF debe empezar con V, E, J, P, G o C y se guarda como `J-12345678-9`), `DELETE /proveedores/{id}` (baja lógica; 409 si tiene compras pendientes de pago), `GET/POST /compras`, `PATCH /compras/{id}/pagado` |
-| Admin | Auditoría | `GET /auditoria/` (filtros `desde`, `hasta`, `modulo`, `accion`, `id_usuario` (0 = sistema), `entidad`, `id_registro`, `id_operacion`, `buscar`; paginado), `GET /auditoria/filtros`, `GET /auditoria/exportar?formato=xlsx\|csv` (mismos filtros, máx. 100 000). Solo lectura. Ver "Auditoría" |
+| Admin | Auditoría | `GET /auditoria/` (filtros `desde`, `hasta`, `modulo`, `accion`, `id_usuario` (0 = sistema), `entidad`, `id_registro`, `id_operacion`, `buscar`; paginado), `GET /auditoria/filtros`, `GET /auditoria/exportar?formato=pdf` (mismos filtros, máx. 100 000; datos para generar el PDF). Solo lectura. Ver "Auditoría" |
+| Gestor | Inicio | `GET /reportes/gestor/resumen`, `GET /compras/entradas-recientes` |
+| Gestor | Inventario | `GET /productos`; `POST /productos/{id}/ajustes-stock` (ajuste justificado); `GET /productos/ajustes-stock` |
+| Gestor | Entradas | `GET/POST /compras` (no puede registrar pagos), `GET /compras/entradas-recientes`, ajustes y facturas de compra |
+| Gestor | Proveedores | `GET/POST/PUT /proveedores`; registra compras, pero no puede eliminar proveedores ni marcar pagos |
+| Gestor | Reportes | `GET /reportes/gestor/resumen`, `/ventas-dia`, `/cuentas-por-pagar`, `/kardex` (movimientos) y `/kardex/exportar` (Excel formateado), más auditoría operativa filtrada |
 | Cajero | Punto de venta | `GET /ventas/mi-resumen`, `GET /tasas/vigente`, `GET /monedas`, `POST /ventas`, `GET /ventas?dia=` |
 | Cajero | Inventario | `GET /productos` (solo lectura; agregar al ticket) |
 | Cajero | Mis ventas | `GET /ventas?dia=` y `?desde&hasta` (el backend solo devuelve las propias) |
@@ -111,6 +143,10 @@ cambió en una misma petición (una venta y los movimientos de stock que causó)
 - **Solo lectura:** la API no tiene rutas para editar ni borrar, y en PostgreSQL un
   trigger rechaza `UPDATE`, `DELETE` y `TRUNCATE` sobre la tabla. No usa llave foránea
   hacia `usuarios`, para que el historial sobreviva aunque se elimine un usuario.
+- Para productos, usuarios, catálogos y movimientos transaccionales, la migración 005
+  instala triggers que rechazan `DELETE` y `TRUNCATE` físicos. Las bajas de productos,
+  usuarios y facturas se hacen como actualizaciones ORM y quedan registradas en esta
+  misma auditoría; las operaciones sobre facturas conservan también su archivo.
 
 ## Carga masiva de inventario (Excel / CSV)
 

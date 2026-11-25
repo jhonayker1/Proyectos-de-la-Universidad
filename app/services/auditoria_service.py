@@ -30,12 +30,20 @@ from app.core.dates import local_now
 from app.models.auditoria import Auditoria
 from app.models.compras import Compra, FacturaImagen
 from app.models.finanzas import Moneda, TasaCambio
-from app.models.inventario import PRODUCTO_INACTIVO, Categoria, Marca, Producto, Proveedor
+from app.models.inventario import (
+    PRODUCTO_INACTIVO,
+    AjusteStock,
+    Categoria,
+    Marca,
+    Producto,
+    Proveedor,
+)
 from app.models.usuarios import Rol, Usuario
 from app.models.ventas import VENTA_ANULADA, Venta
 
 MODULOS = {
     "inventario": "Inventario",
+    "ajustes_stock": "Ajustes de stock",
     "categorias": "Categorías",
     "marcas": "Marcas",
     "proveedores": "Proveedores",
@@ -54,13 +62,14 @@ ACCIONES = {
     "desactivar": "Desactivar",
     "reactivar": "Reactivar",
     "stock": "Movimiento de stock",
+    "ajuste": "Ajuste de stock",
     "contrasena": "Cambio de contraseña",
     "anular": "Anular",
     "pago": "Cambio de pago",
     "importar": "Importar",
     "exportar": "Exportar",
 }
-ROLES = {"admin": "Administrador", "cashier": "Cajero"}
+ROLES = {"admin": "Administrador", "gestor": "Gestor", "cashier": "Cajero"}
 SISTEMA = "Sistema"
 OCULTO = "(oculta)"
 
@@ -108,6 +117,7 @@ SEGUIMIENTOS: dict[type, Seguimiento] = {
             "id_proveedor": "Proveedor", "precio_distribuidor": "Costo USD",
             "precio_usd": "Precio venta USD", "margen_pct": "Margen %", "stock_actual": "Stock",
             "stock_minimo": "Stock mínimo", "ubicacion": "Ubicación", "estado": "Estado",
+            "is_deleted": "Eliminado", "fecha_eliminacion": "Fecha de eliminación",
         },
         lambda v, _: f"{_sku_visible(v.get('sku'))} · {v.get('nombre')}",
         nombres={
@@ -132,14 +142,29 @@ SEGUIMIENTOS: dict[type, Seguimiento] = {
     Proveedor: Seguimiento(
         "proveedores", "proveedor", False,
         {"nombre": "Nombre", "rif": "RIF", "telefono": "Teléfono", "correo": "Correo",
-         "contacto": "Contacto", "ciudad": "Ciudad", "condiciones": "Condiciones", "estado": "Estado"},
+         "contacto": "Contacto", "ciudad": "Ciudad", "direccion": "Dirección",
+         "condiciones": "Condiciones", "estado": "Estado"},
         lambda v, _: str(v.get("nombre")),
         banderas={"estado": ACTIVO},
+    ),
+    AjusteStock: Seguimiento(
+        "inventario", "ajuste de stock", False,
+        {"id_producto": "Producto", "cantidad": "Variación", "stock_anterior": "Stock anterior",
+         "stock_nuevo": "Stock nuevo", "motivo": "Motivo", "observacion": "Observación",
+         "id_usuario": "Usuario"},
+        lambda v, _: str(v.get("id_producto")),
+        nombres={"id_producto": (Producto.id_producto, Producto.nombre),
+                 "id_usuario": (Usuario.id_usuario, Usuario.nombre_completo)},
+        texto_crear=lambda v, _: (
+            f"Ajuste de stock del producto {v.get('id_producto')}: "
+            f"{v.get('stock_anterior')} → {v.get('stock_nuevo')} ({v.get('motivo')})."
+        ),
     ),
     Usuario: Seguimiento(
         "usuarios", "usuario", False,
         {"nombre_completo": "Nombre", "correo": "Correo", "telefono": "Teléfono", "id_rol": "Rol",
-         "permisos": "Permisos", "estado": "Estado", "password_hash": "Contraseña"},
+         "permisos": "Permisos", "estado": "Estado", "password_hash": "Contraseña",
+         "is_deleted": "Eliminado", "fecha_eliminacion": "Fecha de eliminación"},
         lambda v, _: f"{v.get('nombre_completo')} ({v.get('correo')})",
         nombres={"id_rol": (Rol.id_rol, Rol.nombre)},
         banderas={"estado": ACTIVO},
@@ -179,7 +204,8 @@ SEGUIMIENTOS: dict[type, Seguimiento] = {
     FacturaImagen: Seguimiento(
         "facturas", "factura escaneada", True,
         {"nombre_original": "Archivo", "tipo_mime": "Tipo", "tamano_bytes": "Tamaño (bytes)",
-         "id_compra": "Compra"},
+         "id_compra": "Compra", "is_deleted": "Eliminada",
+         "fecha_eliminacion": "Fecha de eliminación"},
         lambda v, _: str(v.get("nombre_original")),
     ),
 }
@@ -372,9 +398,16 @@ class _Nombres:
 
 
 def _accion(p: _Pendiente) -> str:
+    if p.seg.entidad == "ajuste de stock" and p.tipo == "crear":
+        return "ajuste"
     if p.tipo != "modificar":
         return p.tipo
     campos = set(p.cambios)
+    baja = p.cambios.get("is_deleted")
+    if baja and baja[1] is True:
+        return "eliminar"
+    if baja and baja[0] is True and baja[1] is False:
+        return "reactivar"
     if campos <= p.seg.secretos:
         return "contrasena"
     estado = p.cambios.get("estado")
@@ -429,7 +462,7 @@ def _fila(p: _Pendiente, nombres: _Nombres) -> dict[str, Any]:
                 "reactivar": "reactivad", "anular": "anulad"}[accion]
         descripcion = f"{entidad} {referencia} {seg.participio(raiz)}."
         if accion == "eliminar" and p.tipo == "modificar":
-            descripcion = f"{entidad} {referencia} {seg.participio('eliminad')} (se conserva oculto por su historial)."
+            descripcion = f"{entidad} {referencia} {seg.participio('eliminad')} (se conserva como baja lógica)."
     elif accion == "contrasena":
         descripcion = f"{entidad} {referencia}: contraseña cambiada."
     elif accion == "pago":

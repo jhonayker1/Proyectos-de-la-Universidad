@@ -3,13 +3,14 @@ import { useQuery } from '@tanstack/react-query'
 import { AlertTriangle, ChevronDown, Mail, MapPin, Pencil, Phone, Plus, Search, ShoppingBag, Trash2 } from 'lucide-react'
 import { comprasApi, proveedoresApi } from '@/api/endpoints'
 import { keys, useApiMutation, useProductosAdmin, useProveedores } from '@/api/queries'
+import { useCurrentUser } from '@/auth/AuthContext'
 import type { Compra, Proveedor } from '@/api/types'
 import { PALETTE } from '@/shared/components/charts'
 import { Badge, ConfirmDialog, EmptyState, ErrorBanner, Field, Modal, Spinner, StatBox, Tabs, cx, errorText, useToast } from '@/shared/components/ui'
 import { parseLocal, todayIso } from '@/shared/lib/dates'
 import { num, parseDecimal, round2, usd } from '@/shared/lib/money'
 
-type FormProv = { nombre: string; rif: string; contacto: string; telefono: string; correo: string; ciudad: string; condiciones: string }
+type FormProv = { nombre: string; rif: string; contacto: string; telefono: string; correo: string; ciudad: string; direccion: string; condiciones: string }
 
 // Mismas reglas que app/schemas/catalogo.py (el backend vuelve a validar).
 const RIF_RE = /^([VEJPGC])[-\s]?(\d{5,9})(?:[-\s]?(\d))?$/
@@ -42,7 +43,7 @@ function ProveedorModal({ proveedor, onClose }: { proveedor: Proveedor | null; o
   const [form, setForm] = React.useState<FormProv>({
     nombre: proveedor?.nombre ?? '', rif: proveedor?.rif ?? '', contacto: proveedor?.contacto ?? '',
     telefono: proveedor?.telefono ?? '', correo: proveedor?.correo ?? '', ciudad: proveedor?.ciudad ?? '',
-    condiciones: proveedor?.condiciones ?? '',
+    direccion: proveedor?.direccion ?? '', condiciones: proveedor?.condiciones ?? '',
   })
   // Los errores se muestran al salir del campo o al intentar guardar, no mientras se escribe.
   const [tocados, setTocados] = React.useState<Partial<Record<keyof FormProv, boolean>>>({})
@@ -84,21 +85,22 @@ function ProveedorModal({ proveedor, onClose }: { proveedor: Proveedor | null; o
         {guardar.isPending ? 'Guardando...' : 'Guardar'}
       </button>
     </>}>
-      <div className="grid grid-cols-2 gap-3.5">
-        {campo('nombre', 'Nombre', { className: 'col-span-2', autoFocus: true })}
+      <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
+        {campo('nombre', 'Nombre', { className: 'col-span-full', autoFocus: true })}
         {campo('rif', 'RIF', { placeholder: 'J-12345678-9', ayuda: 'Letra V, E, J, P, G o C y los números.' })}
         {campo('contacto', 'Persona de contacto')}
         {campo('telefono', 'Teléfono', { placeholder: '0414-555-0141', type: 'tel' })}
         {campo('correo', 'Correo', { placeholder: 'ventas@proveedor.com', type: 'email' })}
         {campo('ciudad', 'Ciudad')}
+        {campo('direccion', 'Dirección', { className: 'col-span-full' })}
         {campo('condiciones', 'Condiciones de pago', { placeholder: 'Crédito a 30 días' })}
-        <p className="col-span-2 m-0 text-[11px] text-muted-foreground">* Campos obligatorios.</p>
+        <p className="col-span-full m-0 text-[11px] text-muted-foreground">* Campos obligatorios.</p>
         {intentado && hayErrores && (
-          <div className="col-span-2 rounded-lg bg-danger/10 px-3 py-2 text-xs font-semibold text-danger">
+          <div className="col-span-full rounded-lg bg-danger/10 px-3 py-2 text-xs font-semibold text-danger">
             Revise los campos marcados en rojo antes de guardar.
           </div>
         )}
-        {guardar.error && <div className="col-span-2"><ErrorBanner error={guardar.error} /></div>}
+        {guardar.error && <div className="col-span-full"><ErrorBanner error={guardar.error} /></div>}
       </div>
     </Modal>
   )
@@ -106,7 +108,9 @@ function ProveedorModal({ proveedor, onClose }: { proveedor: Proveedor | null; o
 
 type Linea = { id_producto: string; cantidad: string; costo: string }
 
-function CompraModal({ proveedor, onClose }: { proveedor: Proveedor; onClose: () => void }) {
+export function CompraModal({ proveedor, onClose, allowPayment = true }: {
+  proveedor: Proveedor; onClose: () => void; allowPayment?: boolean
+}) {
   const toast = useToast()
   const productos = useProductosAdmin()
   const [factura, setFactura] = React.useState('')
@@ -122,7 +126,7 @@ function CompraModal({ proveedor, onClose }: { proveedor: Proveedor; onClose: ()
 
   const guardar = useApiMutation(() => comprasApi.create({
     id_proveedor: proveedor.id_proveedor, numero_factura: factura.trim() || null, fecha,
-    descripcion: descripcion.trim() || null, pagado, actualizar_costos: actualizar,
+    descripcion: descripcion.trim() || null, pagado: allowPayment && pagado, actualizar_costos: actualizar,
     detalles: lineas.map(l => ({ id_producto: Number(l.id_producto), cantidad: Number(l.cantidad), costo_unitario_usd: parseDecimal(l.costo).toFixed(2) })),
   }), [keys.compras, keys.productos, keys.reportes], c => {
     toast(`Compra registrada (${usd(c.monto_usd)}); stock actualizado.`); onClose()
@@ -135,17 +139,18 @@ function CompraModal({ proveedor, onClose }: { proveedor: Proveedor; onClose: ()
         {guardar.isPending ? 'Registrando...' : `Registrar ${usd(total)}`}
       </button>
     </>}>
-      <div className="grid grid-cols-3 gap-3.5">
+      <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2 xl:grid-cols-3">
         <Field label="N.º de factura"><input className="input" value={factura} onChange={e => setFactura(e.target.value)} placeholder="F-004512" /></Field>
         <Field label="Fecha"><input className="input" type="date" max={todayIso()} value={fecha} onChange={e => setFecha(e.target.value)} /></Field>
         <Field label="Descripción"><input className="input" value={descripcion} onChange={e => setDescripcion(e.target.value)} placeholder="40 cauchos 195/65 R15" /></Field>
       </div>
-      <div className="mt-4 rounded-xl border border-border">
-        <div className="grid grid-cols-[1fr_90px_120px_32px] gap-2 border-b border-border bg-muted px-3 py-2 text-[11px] font-semibold text-muted-foreground">
-          <span>Producto</span><span>Cantidad</span><span>Costo unit. USD</span><span />
-        </div>
-        {lineas.map((l, i) => (
-          <div key={i} className="grid grid-cols-[1fr_90px_120px_32px] items-center gap-2 border-b border-border px-3 py-2 last:border-b-0">
+      <div className="mt-4 overflow-x-auto rounded-xl border border-border">
+        <div className="min-w-[520px]">
+          <div className="grid grid-cols-[1fr_90px_120px_32px] gap-2 border-b border-border bg-muted px-3 py-2 text-[11px] font-semibold text-muted-foreground">
+            <span>Producto</span><span>Cantidad</span><span>Costo unit. USD</span><span />
+          </div>
+          {lineas.map((l, i) => (
+            <div key={i} className="grid grid-cols-[1fr_90px_120px_32px] items-center gap-2 border-b border-border px-3 py-2 last:border-b-0">
             <select aria-label="Producto" className="input !bg-card" value={l.id_producto}
               onChange={e => {
                 const p = activos.find(x => String(x.id_producto) === e.target.value)
@@ -157,15 +162,16 @@ function CompraModal({ proveedor, onClose }: { proveedor: Proveedor; onClose: ()
             <input aria-label="Cantidad" className="input !bg-card" type="number" min={1} value={l.cantidad} onChange={e => setLinea(i, { cantidad: e.target.value })} />
             <input aria-label="Costo unitario" className="input !bg-card" inputMode="decimal" value={l.costo} onChange={e => setLinea(i, { costo: e.target.value })} />
             <button aria-label="Quitar línea" className="btn-icon text-danger" disabled={lineas.length === 1} onClick={() => setLineas(ls => ls.filter((_, j) => j !== i))}><Trash2 size={13} /></button>
+            </div>
+          ))}
+          <div className="flex items-center justify-between gap-2 px-3 py-2">
+            <button className="btn-muted !px-3 !py-1 text-xs" onClick={() => setLineas(ls => [...ls, { id_producto: '', cantidad: '1', costo: '' }])}><Plus size={12} /> Agregar producto</button>
+            <span className="text-[13px]">Total: <b className="font-display text-primary">{usd(total)}</b></span>
           </div>
-        ))}
-        <div className="flex items-center justify-between px-3 py-2">
-          <button className="btn-muted !px-3 !py-1 text-xs" onClick={() => setLineas(ls => [...ls, { id_producto: '', cantidad: '1', costo: '' }])}><Plus size={12} /> Agregar producto</button>
-          <span className="text-[13px]">Total: <b className="font-display text-primary">{usd(total)}</b></span>
         </div>
       </div>
       <div className="mt-3.5 flex flex-col gap-2 text-[13px]">
-        <label className="flex items-center gap-2"><input type="checkbox" checked={pagado} onChange={e => setPagado(e.target.checked)} /> Ya está pagada</label>
+        {allowPayment && <label className="flex items-center gap-2"><input type="checkbox" checked={pagado} onChange={e => setPagado(e.target.checked)} /> Ya está pagada</label>}
         <label className="flex items-center gap-2"><input type="checkbox" checked={actualizar} onChange={e => setActualizar(e.target.checked)} />
           Actualizar el costo (precio distribuidor) de cada producto con el de esta compra</label>
       </div>
@@ -174,7 +180,7 @@ function CompraModal({ proveedor, onClose }: { proveedor: Proveedor; onClose: ()
   )
 }
 
-function HistorialCompras({ compras }: { compras: Compra[] }) {
+function HistorialCompras({ compras, allowPayment = true }: { compras: Compra[]; allowPayment?: boolean }) {
   const toast = useToast()
   const pagar = useApiMutation((c: Compra) => comprasApi.setPagado(c.id_compra, !c.pagado), [keys.compras])
   if (compras.length === 0) return <EmptyState title="Sin compras registradas." />
@@ -187,10 +193,12 @@ function HistorialCompras({ compras }: { compras: Compra[] }) {
             <div className="text-muted-foreground">{parseLocal(c.fecha).toLocaleDateString('es-VE', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
           </div>
           <span className="font-display font-bold">{usd(c.monto_usd)}</span>
-          <button title={c.pagado ? 'Marcar como pendiente' : 'Marcar como pagada'} className="cursor-pointer border-none bg-transparent p-0"
-            onClick={() => pagar.mutate(c, { onError: e => toast(errorText(e), 'error') })}>
-            <Badge tone={c.pagado ? 'Pagada' : 'Pendiente'}>{c.pagado ? 'Pagada' : 'Pendiente'}</Badge>
-          </button>
+          {allowPayment ? (
+            <button title={c.pagado ? 'Marcar como pendiente' : 'Marcar como pagada'} className="cursor-pointer border-none bg-transparent p-0"
+              onClick={() => pagar.mutate(c, { onError: e => toast(errorText(e), 'error') })}>
+              <Badge tone={c.pagado ? 'Pagada' : 'Pendiente'}>{c.pagado ? 'Pagada' : 'Pendiente'}</Badge>
+            </button>
+          ) : <Badge tone={c.pagado ? 'Pagada' : 'Pendiente'}>{c.pagado ? 'Pagada' : 'Pendiente'}</Badge>}
         </div>
       ))}
     </div>
@@ -246,6 +254,8 @@ function EliminarProveedor({ proveedor, pendientes, onClose }: { proveedor: Prov
 }
 
 export default function Proveedores() {
+  const currentUser = useCurrentUser()
+  const isAdmin = currentUser.rol === 'admin'
   const proveedores = useProveedores()
   const compras = useQuery({ queryKey: keys.compras, queryFn: () => comprasApi.list({ limite: 1000 }) })
   const productos = useProductosAdmin()
@@ -317,19 +327,20 @@ export default function Proveedores() {
                   <span className="min-w-[90px] text-right"><span className="block text-[11px] text-muted-foreground">Deuda</span><span className={cx('font-display font-bold', deuda > 0 ? 'text-red-600' : 'text-success')}>{usd(deuda)}</span></span>
                   <ChevronDown size={18} className={cx('text-muted-foreground transition-transform', open && 'rotate-180')} />
                 </button>
-                <button aria-label={`Eliminar ${p.nombre}`} title="Eliminar proveedor" className="btn-icon mr-[18px] !h-8 !w-8 text-danger"
+                {isAdmin && <button aria-label={`Eliminar ${p.nombre}`} title="Eliminar proveedor" className="btn-icon mr-[18px] !h-8 !w-8 text-danger"
                   onClick={() => setEliminar(p)}>
                   <Trash2 size={14} />
-                </button>
+                </button>}
               </div>
               {open && (
-                <div className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-5 border-t border-border p-[18px]">
+                <div className="grid grid-cols-1 gap-5 border-t border-border p-[18px] md:grid-cols-[repeat(auto-fit,minmax(280px,1fr))]">
                   <div className="flex flex-col gap-2 text-[13px]">
                     <div className="font-display text-[13px] font-bold">Contacto</div>
                     <div>{p.contacto ?? '—'}</div>
                     {p.telefono && <div className="flex items-center gap-2"><Phone size={14} /> {p.telefono}</div>}
                     {p.correo && <div className="flex items-center gap-2"><Mail size={14} /> {p.correo}</div>}
                     {p.ciudad && <div className="flex items-center gap-2"><MapPin size={14} /> {p.ciudad}</div>}
+                    {p.direccion && <div>{p.direccion}</div>}
                     <div className="mt-2 font-display text-[13px] font-bold">Condiciones</div>
                     <div>{p.condiciones ?? '—'}</div>
                     <div className="mt-2 font-display text-[13px] font-bold">Productos que suministra</div>
@@ -344,7 +355,7 @@ export default function Proveedores() {
                   </div>
                   <div>
                     <div className="mb-2 font-display text-[13px] font-bold">Historial de compras</div>
-                    {compras.isLoading ? <Spinner /> : <HistorialCompras compras={cs} />}
+                    {compras.isLoading ? <Spinner /> : <HistorialCompras compras={cs} allowPayment={isAdmin} />}
                   </div>
                 </div>
               )}
@@ -353,8 +364,8 @@ export default function Proveedores() {
         })}
 
       {editar && <ProveedorModal proveedor={editar.p} onClose={() => setEditar(null)} />}
-      {comprar && <CompraModal proveedor={comprar} onClose={() => setComprar(null)} />}
-      {eliminar && (
+      {comprar && <CompraModal proveedor={comprar} onClose={() => setComprar(null)} allowPayment={isAdmin} />}
+      {isAdmin && eliminar && (
         <EliminarProveedor proveedor={eliminar} onClose={() => setEliminar(null)}
           pendientes={comprasDe(eliminar.id_proveedor).filter(c => !c.pagado)} />
       )}

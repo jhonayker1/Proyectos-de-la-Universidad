@@ -1,3 +1,5 @@
+from datetime import datetime
+
 import pytest
 
 from app.core.config import settings
@@ -97,22 +99,50 @@ def test_purchase_adds_stock_updates_cost_and_debt(client, db_session):
     ).status_code == 422
 
 
-def test_delete_product_without_history_removes_it(client, db_session):
+def test_delete_product_without_history_archives_it_when_stock_is_zero(client, db_session):
     add_admin(db_session)
     admin = auth_header(client, "admin@test.com")
-    p = add_product(db_session, "BORRAR-1", stock=3)
+    p = add_product(db_session, "BORRAR-1", stock=0)
 
     assert client.delete(f"/productos/{p.id_producto}", headers=admin).status_code == 204
 
     db_session.expire_all()
-    assert db_session.get(Producto, p.id_producto) is None
+    archivado = db_session.get(Producto, p.id_producto)
+    assert archivado.is_deleted is True
+    assert archivado.sku == "BORRAR-1"
+    assert archivado.stock_actual == 0
     assert client.get("/productos/admin", headers=admin).json() == []
+    visibles = client.get("/productos/admin?incluir_eliminados=true", headers=admin).json()
+    assert len(visibles) == 1 and visibles[0]["is_deleted"] is True
+
+    reemplazo = client.post("/productos/", headers=admin, json={
+        "sku": "BORRAR-1", "nombre": "Reemplazo", "id_categoria": 1, "precio_usd": "12.00"})
+    assert reemplazo.status_code == 201, reemplazo.text
+    assert client.post(f"/productos/{p.id_producto}/restaurar", headers=admin).status_code == 409
+    assert client.delete(f"/productos/{reemplazo.json()['id_producto']}", headers=admin).status_code == 204
+    restaurado = client.post(f"/productos/{p.id_producto}/restaurar", headers=admin)
+    assert restaurado.status_code == 200 and restaurado.json()["sku"] == "BORRAR-1"
+    assert restaurado.json()["stock_actual"] == 0
+
+
+def test_delete_product_with_stock_is_rejected(client, db_session):
+    add_admin(db_session)
+    admin = auth_header(client, "admin@test.com")
+    p = add_product(db_session, "STOCK-1", stock=3)
+
+    response = client.delete(f"/productos/{p.id_producto}", headers=admin)
+
+    assert response.status_code == 409
+    assert "producto con stock" in response.json()["detail"]
+    db_session.refresh(p)
+    assert p.is_deleted is False
+    assert p.stock_actual == 3
 
 
 def test_delete_product_with_sales_hides_it_and_keeps_history(client, db_session):
     add_admin(db_session)
     admin = auth_header(client, "admin@test.com")
-    p = add_product(db_session, "HIST-1", stock=5, precio_usd="10.00")
+    p = add_product(db_session, "HIST-1", stock=2, precio_usd="10.00")
     venta = client.post("/ventas/", headers=admin, json={
         "codigo_moneda_pago": "USD", "detalles": [{"id_producto": p.id_producto, "cantidad": 2}]}).json()
 
@@ -125,12 +155,38 @@ def test_delete_product_with_sales_hides_it_and_keeps_history(client, db_session
     # …pero la venta conserva su detalle.
     detalle = client.get(f"/ventas/{venta['id_venta']}", headers=admin).json()["detalles"][0]
     assert detalle["nombre_producto_snapshot"] == "Producto HIST-1"
-    # El SKU queda libre para un producto nuevo.
+    # El SKU queda libre mediante el índice parcial, sin alterar el SKU histórico.
     nuevo = client.post("/productos/", headers=admin, json={
         "sku": "HIST-1", "nombre": "Reemplazo", "id_categoria": 1, "precio_usd": "12.00"})
     assert nuevo.status_code == 201, nuevo.text
     ocultos = client.get("/productos/admin?incluir_eliminados=true", headers=admin).json()
-    assert {x["sku"] for x in ocultos} == {"HIST-1", f"HIST-1~{p.id_producto}"}
+    assert len(ocultos) == 2 and all(x["sku"] == "HIST-1" for x in ocultos)
+    assert sum(x["is_deleted"] for x in ocultos) == 1
+    top = client.get("/reportes/top-productos", headers=admin).json()
+    assert top[0]["id_producto"] == p.id_producto and top[0]["unidades"] == 2
+    stock_categoria = client.get("/reportes/stock-por-categoria", headers=admin).json()
+    assert stock_categoria[0]["unidades"] == 0
+    assert client.post(f"/productos/{p.id_producto}/restaurar", headers=admin).status_code == 409
+    assert client.delete(f"/productos/{nuevo.json()['id_producto']}", headers=admin).status_code == 204
+    assert client.post(f"/productos/{p.id_producto}/restaurar", headers=admin).status_code == 200
+
+
+def test_restore_preserves_archived_sku_and_manual_inactive_state(client, db_session):
+    add_admin(db_session)
+    admin = auth_header(client, "admin@test.com")
+    p = add_product(db_session, "LEG-1", stock=3)
+    p.sku = f"LEG-1~{p.id_producto}"
+    p.estado = "Inactivo"
+    p.is_deleted = True
+    p.fecha_eliminacion = datetime.now()
+    db_session.commit()
+
+    restaurado = client.post(f"/productos/{p.id_producto}/restaurar", headers=admin)
+
+    assert restaurado.status_code == 200, restaurado.text
+    assert restaurado.json()["sku"] == f"LEG-1~{p.id_producto}"
+    assert restaurado.json()["estado"] == "Inactivo"
+    assert restaurado.json()["is_deleted"] is False
 
 
 def test_category_with_stock_cannot_be_deactivated(client, db_session):
@@ -147,8 +203,10 @@ def test_category_with_stock_cannot_be_deactivated(client, db_session):
     assert client.put("/categorias/1", headers=admin, json={"estado": 0}).status_code == 409
     assert db_session.get(Categoria, 1).estado == 1
 
-    # Un producto dado de baja (Inactivo) no cuenta aunque tenga stock.
-    client.delete(f"/productos/{con_stock.id_producto}", headers=admin)
+    # Tras dejar el stock en cero, se puede archivar el producto para desactivar la categoría.
+    con_stock.stock_actual = 0
+    db_session.commit()
+    assert client.delete(f"/productos/{con_stock.id_producto}", headers=admin).status_code == 204
     assert client.delete("/categorias/1", headers=admin).status_code == 204
     db_session.expire_all()
     assert db_session.get(Categoria, 1).estado == 0
@@ -288,10 +346,22 @@ def test_user_edit_password_reset_and_delete(client, db_session):
     ).status_code == 200
 
     assert client.delete(f"/usuarios/{cajero.id_usuario}", headers=admin).status_code == 204
-    assert db_session.query(Usuario).filter(Usuario.correo == "cajero@test.com").first() is None
+    archivado = db_session.get(Usuario, cajero.id_usuario)
+    assert archivado is not None and archivado.is_deleted is True
+    assert client.post(
+        "/auth/login", json={"correo": "cajero@test.com", "password": "nueva-clave-1"}
+    ).status_code == 401
+    assert all(
+        u["id_usuario"] != cajero.id_usuario
+        for u in client.get("/usuarios/", headers=admin).json()
+    )
+    assert client.post(f"/usuarios/{cajero.id_usuario}/restaurar", headers=admin).status_code == 200
+    assert client.post(
+        "/auth/login", json={"correo": "cajero@test.com", "password": "nueva-clave-1"}
+    ).status_code == 200
 
 
-def test_user_with_sales_cannot_be_deleted(client, db_session):
+def test_user_with_sales_can_be_archived_without_breaking_history(client, db_session):
     add_admin(db_session)
     cajero = add_cashier(db_session)
     p = add_product(db_session, "DEL-1", stock=2)
@@ -301,11 +371,13 @@ def test_user_with_sales_cannot_be_deleted(client, db_session):
         json={"codigo_moneda_pago": "USD", "detalles": [{"id_producto": p.id_producto}]},
     )
 
-    response = client.delete(
-        f"/usuarios/{cajero.id_usuario}", headers=auth_header(client, "admin@test.com")
-    )
+    admin = auth_header(client, "admin@test.com")
+    response = client.delete(f"/usuarios/{cajero.id_usuario}", headers=admin)
 
-    assert response.status_code == 409
+    assert response.status_code == 204
+    db_session.expire_all()
+    assert db_session.get(Usuario, cajero.id_usuario).is_deleted is True
+    assert client.get("/ventas/", headers=admin).json()[0]["nombre_usuario"] == "cajero"
 
 
 def test_invoice_upload_download_and_validation(client, db_session, tmp_path, monkeypatch):
@@ -341,7 +413,18 @@ def test_invoice_upload_download_and_validation(client, db_session, tmp_path, mo
     ).status_code == 403
 
     assert client.delete(f"/facturas/{factura['id_factura_img']}", headers=admin).status_code == 204
-    assert list((tmp_path / "facturas").iterdir()) == []
+    assert len(list((tmp_path / "facturas").iterdir())) == 1
+    assert client.get("/facturas/", headers=admin).json() == []
+    archivadas = client.get("/facturas/?incluir_eliminadas=true", headers=admin).json()
+    assert len(archivadas) == 1 and archivadas[0]["is_deleted"] is True
+    assert client.get(f"/facturas/{factura['id_factura_img']}/archivo", headers=admin).status_code == 404
+    assert client.get(
+        f"/facturas/{factura['id_factura_img']}/archivo?incluir_eliminadas=true",
+        headers=admin,
+    ).content == PNG_1PX
+    restaurada = client.post(f"/facturas/{factura['id_factura_img']}/restaurar", headers=admin)
+    assert restaurada.status_code == 200 and restaurada.json()["is_deleted"] is False
+    assert len(client.get("/facturas/", headers=admin).json()) == 1
 
 
 def test_dashboard_series_top_and_stock_reports(client, db_session):

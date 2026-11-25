@@ -216,7 +216,7 @@ class Importador:
         filas = self.db.query(
             Producto.id_producto, Producto.sku, Producto.nombre, Producto.id_categoria,
             Producto.id_marca, Producto.estado,
-        )
+        ).filter(Producto.is_deleted.is_(False))
         for id_producto, sku, nombre, id_categoria, id_marca, estado in filas:
             self.existentes[sku.upper()] = _Existente(id_producto, nombre, estado)
             if estado != PRODUCTO_INACTIVO:
@@ -460,7 +460,13 @@ class Importador:
     def _escribir_lote(self, lote: list[tuple[Plan, dict[str, Any]]]) -> None:
         skus = [p.sku for p, _ in lote if p.accion == ACTUALIZAR]
         actuales = (
-            {p.sku.upper(): p for p in self.db.query(Producto).filter(Producto.sku.in_(skus))}
+            {
+                p.sku.upper(): p
+                for p in self.db.query(Producto).filter(
+                    Producto.sku.in_(skus),
+                    Producto.is_deleted.is_(False),
+                )
+            }
             if skus else {}
         )
         for plan, datos in lote:

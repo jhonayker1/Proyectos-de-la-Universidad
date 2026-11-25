@@ -1,19 +1,23 @@
 from passlib.context import CryptContext
 
 from app.models import Usuario
-from tests.conftest import PASSWORD, add_admin, add_cashier, add_user, auth_header
+from tests.conftest import PASSWORD, add_admin, add_cashier, add_gestor, add_user, auth_header
 
 
 def test_login_by_email_returns_role(client, db_session):
     add_admin(db_session)
     add_cashier(db_session)
+    add_gestor(db_session)
 
     admin = client.post("/auth/login", json={"correo": "ADMIN@test.com", "password": PASSWORD})
     cashier = client.post("/auth/login", json={"correo": "cajero@test.com", "password": PASSWORD})
+    gestor = client.post("/auth/login", json={"correo": "gestor@test.com", "password": PASSWORD})
 
     assert admin.status_code == 200
     assert admin.json()["rol"] == "admin"
     assert cashier.json()["rol"] == "cashier"
+    assert gestor.status_code == 200
+    assert gestor.json()["rol"] == "gestor"
     me = client.get("/auth/me", headers=auth_header(client, "cajero@test.com")).json()
     assert me["correo"] == "cajero@test.com"
     assert "password_hash" not in me
@@ -37,6 +41,26 @@ def test_admin_creates_cashier_and_cashier_cannot(client, db_session):
     assert created.json()["id_rol"] == 2
     stored = db_session.query(Usuario).filter(Usuario.correo == "nuevo@test.com").one()
     assert stored.password_hash.startswith("$2b$")
+
+
+def test_admin_can_create_manager(client, db_session):
+    add_admin(db_session)
+    headers = auth_header(client, "admin@test.com")
+
+    response = client.post(
+        "/usuarios/",
+        headers=headers,
+        json={
+            "nombre_completo": "Nuevo Gestor",
+            "correo": "gestor-nuevo@test.com",
+            "password": "secure-pass-456",
+            "rol": "gestor",
+        },
+    )
+
+    assert response.status_code == 201, response.text
+    assert response.json()["rol"] == "gestor"
+    assert response.json()["id_rol"] == 3
 
 
 def test_inactive_wrong_password_and_missing_token_are_rejected(client, db_session):

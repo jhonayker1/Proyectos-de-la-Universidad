@@ -26,7 +26,7 @@ from app.services.precios_service import apply_margin_price
 router = APIRouter(
     prefix="/compras",
     tags=["compras"],
-    dependencies=[Depends(require_roles(["admin"]))],
+    dependencies=[Depends(require_roles(["admin", "gestor"]))],
 )
 
 
@@ -119,10 +119,15 @@ def get_purchase(id_compra: int, db: Session = Depends(get_db)) -> CompraRead:
 def create_purchase(
     compra_in: CompraCreate,
     db: Session = Depends(get_db),
-    admin: Usuario = Depends(require_roles(["admin"])),
+    current_user: Usuario = Depends(require_roles(["admin", "gestor"])),
 ) -> CompraRead:
     """Registra la compra y, en la misma transacción, suma el stock de cada producto."""
     establecer_origen(db, "Compra a proveedor (entrada de stock)")
+    if current_user.rol == "gestor" and compra_in.pagado:
+        raise HTTPException(
+            status_code=403,
+            detail="El gestor no puede registrar ni marcar pagos de compras.",
+        )
     proveedor = db.get(Proveedor, compra_in.id_proveedor)
     if proveedor is None or proveedor.estado != 1:
         raise HTTPException(status_code=404, detail="Proveedor no encontrado o eliminado.")
@@ -142,7 +147,7 @@ def create_purchase(
         descripcion=compra_in.descripcion,
         monto_usd=Decimal("0.00"),
         pagado=1 if compra_in.pagado else 0,
-        id_usuario=admin.id_usuario,
+        id_usuario=current_user.id_usuario,
     )
     total = Decimal("0.00")
     for item in compra_in.detalles:
@@ -172,6 +177,7 @@ def set_paid(
     id_compra: int,
     update: CompraPagadoUpdate,
     db: Session = Depends(get_db),
+    _: Usuario = Depends(require_roles(["admin"])),
 ) -> CompraRead:
     compra = get_or_404(db, id_compra)
     compra.pagado = 1 if update.pagado else 0

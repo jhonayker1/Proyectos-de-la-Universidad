@@ -64,17 +64,25 @@ def init_db() -> None:
         raise RuntimeError(
             "Faltan tablas o columnas en la base de datos: " + ", ".join(missing)
             + ". Aplique las migraciones pendientes de la carpeta migrations/ "
-            "(002_frontend.sql, 003_sku_por_categoria.py y 004_auditoria.sql) antes de iniciar."
+            "(002_frontend.sql, 003_sku_por_categoria.py, 004_auditoria.sql, "
+            "005_baja_logica.sql y 006_gestor.sql) antes de iniciar."
         )
 
 
 def seed_reference_data() -> None:
     """Solo SQLite de desarrollo: roles y monedas mínimos que cauchos_rey_def ya trae."""
     from app.models import Moneda, Rol
+    from app.models.usuarios import role_key
 
     with SessionLocal() as db:
-        if db.query(Rol).count() == 0:
-            db.add_all([Rol(nombre="Administrador"), Rol(nombre="Cajero")])
+        existing_roles = {role_key(rol.nombre) for rol in db.query(Rol).all()}
+        for key, nombre in (
+            ("admin", "Administrador"),
+            ("cashier", "Cajero"),
+            ("gestor", "Gestor"),
+        ):
+            if key not in existing_roles:
+                db.add(Rol(nombre=nombre))
         if db.query(Moneda).count() == 0:
             db.add_all(
                 [

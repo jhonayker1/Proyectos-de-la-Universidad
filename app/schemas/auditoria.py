@@ -38,6 +38,11 @@ class PaginaAuditoria(BaseModel):
     items: list[RegistroAuditoria]
 
 
+class ExportacionAuditoria(BaseModel):
+    total: int
+    items: list[RegistroAuditoria]
+
+
 class Opcion(BaseModel):
     clave: str
     etiqueta: str

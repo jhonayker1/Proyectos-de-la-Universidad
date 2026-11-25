@@ -75,5 +75,7 @@ class FacturaRead(BaseModel):
     id_compra: int | None
     id_usuario: int
     fecha_subida: datetime | None
+    is_deleted: bool = False
+    fecha_eliminacion: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)

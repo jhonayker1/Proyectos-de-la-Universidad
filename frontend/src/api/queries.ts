@@ -13,6 +13,7 @@ export const keys = {
   tasas: ['tasas'] as const,
   ventas: ['ventas'] as const,
   compras: ['compras'] as const,
+  ajustes: ['ajustes-stock'] as const,
   facturas: ['facturas'] as const,
   reportes: ['reportes'] as const,
 }
@@ -34,9 +35,10 @@ export function useMonedas() {
 }
 
 /** Tasa vigente de una moneda; null si aún no hay ninguna registrada (409 del backend). */
-export function useTasa(codigo: string) {
+export function useTasa(codigo: string, enabled = true) {
   return useQuery({
     queryKey: [...keys.tasas, 'vigente', codigo],
+    enabled,
     queryFn: async () => {
       try {
         return await finanzasApi.tasaVigente(codigo)
@@ -48,8 +50,11 @@ export function useTasa(codigo: string) {
   })
 }
 
-export function useProductosAdmin() {
-  return useQuery({ queryKey: [...keys.productos, 'admin'], queryFn: productosApi.listAdmin })
+export function useProductosAdmin(incluirEliminados = false) {
+  return useQuery({
+    queryKey: [...keys.productos, 'admin', incluirEliminados],
+    queryFn: () => productosApi.listAdmin(incluirEliminados),
+  })
 }
 
 export function useProductos() {

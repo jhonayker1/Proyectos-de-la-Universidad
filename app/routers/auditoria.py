@@ -1,17 +1,11 @@
 """Bitácora de auditoría: solo consulta y exportación (no hay rutas para editar ni borrar;
 en PostgreSQL un trigger además rechaza UPDATE/DELETE sobre la tabla)."""
 
-import csv
-import io
 import json
 from datetime import date
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import Response
-from openpyxl import Workbook
-from openpyxl.cell import WriteOnlyCell
-from openpyxl.styles import Font, PatternFill
 from sqlalchemy import or_
 from sqlalchemy.orm import Query as SAQuery
 from sqlalchemy.orm import Session
@@ -21,19 +15,17 @@ from app.core.dependencies import require_roles
 from app.database.session import get_db
 from app.models.auditoria import Auditoria
 from app.models.usuarios import Usuario
-from app.schemas.auditoria import FiltrosAuditoria, PaginaAuditoria
+from app.schemas.auditoria import ExportacionAuditoria, FiltrosAuditoria, PaginaAuditoria
 from app.services.auditoria_service import ACCIONES, MODULOS, registrar
 
 router = APIRouter(
     prefix="/auditoria",
     tags=["auditoría"],
-    dependencies=[Depends(require_roles(["admin"]))],
+    dependencies=[Depends(require_roles(["admin", "gestor"]))],
 )
 
 MAX_EXPORTAR = 100_000
-XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-COLUMNAS = ("Fecha", "Usuario", "Rol", "Módulo", "Acción", "Entidad", "ID registro", "Referencia",
-            "Descripción", "Cambios", "Origen", "Ruta", "IP", "Operación")
+MODULOS_GESTOR = {"inventario", "categorias", "marcas", "proveedores", "compras"}
 
 
 class Filtros:
@@ -107,8 +99,13 @@ def list_audit(
     pagina: int = Query(default=1, ge=1),
     por_pagina: int = Query(default=50, ge=1, le=200),
     db: Session = Depends(get_db),
+    current_user: Usuario = Depends(require_roles(["admin", "gestor"])),
 ) -> dict:
     query = filtros.aplicar(db.query(Auditoria))
+    if current_user.rol == "gestor":
+        if filtros.modulo and filtros.modulo not in MODULOS_GESTOR:
+            raise HTTPException(status_code=403, detail="No tienes permisos para consultar ese módulo.")
+        query = query.filter(Auditoria.modulo.in_(MODULOS_GESTOR))
     total = query.count()
     filas = (query.order_by(Auditoria.fecha.desc(), Auditoria.id_auditoria.desc())
              .offset((pagina - 1) * por_pagina).limit(por_pagina).all())
@@ -116,13 +113,23 @@ def list_audit(
 
 
 @router.get("/filtros", response_model=FiltrosAuditoria)
-def audit_filters(db: Session = Depends(get_db)) -> dict:
+def audit_filters(
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(require_roles(["admin", "gestor"])),
+) -> dict:
     """Opciones para los filtros; los usuarios salen de la bitácora (incluye eliminados)."""
     usuarios = {}
-    for id_usuario, nombre in db.query(Auditoria.id_usuario, Auditoria.nombre_usuario).distinct():
+    query = db.query(Auditoria.id_usuario, Auditoria.nombre_usuario)
+    if current_user.rol == "gestor":
+        query = query.filter(Auditoria.modulo.in_(MODULOS_GESTOR))
+    for id_usuario, nombre in query.distinct():
         usuarios.setdefault(id_usuario, nombre)  # si cambió de nombre, basta uno
     return {
-        "modulos": [{"clave": k, "etiqueta": v} for k, v in MODULOS.items()],
+        "modulos": [
+            {"clave": k, "etiqueta": v}
+            for k, v in MODULOS.items()
+            if current_user.rol == "admin" or k in MODULOS_GESTOR
+        ],
         "acciones": [{"clave": k, "etiqueta": v} for k, v in ACCIONES.items()],
         "usuarios": sorted(
             ({"id_usuario": i, "nombre": n} for i, n in usuarios.items()),
@@ -131,36 +138,14 @@ def audit_filters(db: Session = Depends(get_db)) -> dict:
     }
 
 
-def _texto_cambios(a: Auditoria) -> str:
-    return "\n".join(
-        f"{c.get('etiqueta')}: {c.get('antes') or '—'} → {c.get('despues') or '—'}"
-        for c in _cambios(a.cambios)
-    )
-
-
-def _valores(a: Auditoria) -> list:
-    return [
-        a.fecha.strftime("%Y-%m-%d %H:%M:%S") if a.fecha else None, a.nombre_usuario, a.rol,
-        MODULOS.get(a.modulo, a.modulo), ACCIONES.get(a.accion, a.accion), a.entidad, a.id_registro,
-        a.referencia, a.descripcion, _texto_cambios(a), a.origen, a.ruta, a.ip, a.id_operacion,
-    ]
-
-
-def _seguro_csv(valor) -> str:
-    """Evita que Excel interprete un texto como fórmula al abrir el CSV."""
-    texto = "" if valor is None else str(valor)
-    return "'" + texto if texto[:1] in ("=", "+", "-", "@") else texto
-
-
-@router.get("/exportar")
+@router.get("/exportar", response_model=ExportacionAuditoria)
 def export_audit(
-    formato: Literal["xlsx", "csv"] = Query(default="xlsx"),
+    formato: Literal["pdf"] = Query(default="pdf"),
     filtros: Filtros = Depends(),
     db: Session = Depends(get_db),
     admin: Usuario = Depends(require_roles(["admin"])),
 ):
-    """Exporta los registros que cumplen los filtros (máximo 100 000). La exportación
-    misma queda registrada en la auditoría."""
+    """Prepara los registros para el PDF (máximo 100 000) y registra la exportación."""
     query = filtros.aplicar(db.query(Auditoria))
     total = query.count()
     if total > MAX_EXPORTAR:
@@ -168,47 +153,11 @@ def export_audit(
             status_code=413,
             detail=f"Hay {total} registros; el máximo por exportación es {MAX_EXPORTAR}. Acote las fechas o los filtros.",
         )
-    filas = query.order_by(Auditoria.fecha.desc(), Auditoria.id_auditoria.desc()).yield_per(1000)
-    nombre = f"auditoria_{local_now():%Y%m%d_%H%M}.{formato}"
-
-    if formato == "csv":
-        salida = io.StringIO()
-        escritor = csv.writer(salida, delimiter=";")
-        escritor.writerow(COLUMNAS)
-        for a in filas:
-            escritor.writerow([_seguro_csv(v) for v in _valores(a)])
-        contenido = "﻿" + salida.getvalue()  # BOM: Excel en español abre bien los acentos
-    else:
-        libro = Workbook(write_only=True)
-        hoja = libro.create_sheet("Auditoría")
-        for i, ancho in enumerate((18, 22, 14, 14, 18, 16, 10, 34, 70, 60, 34, 28, 14, 34), start=1):
-            hoja.column_dimensions[chr(64 + i)].width = ancho
-        hoja.freeze_panes = "A2"
-        titulo, fondo = Font(bold=True, color="FFFFFF"), PatternFill("solid", fgColor="4F46E5")
-        encabezados = []
-        for c in COLUMNAS:
-            celda = WriteOnlyCell(hoja, value=c)
-            celda.font, celda.fill = titulo, fondo
-            encabezados.append(celda)
-        hoja.append(encabezados)
-        for a in filas:
-            fila = []
-            for v in _valores(a):
-                celda = WriteOnlyCell(hoja, value=v)
-                if isinstance(v, str) and v.startswith(("=", "+", "-", "@")):
-                    celda.data_type = "s"  # texto, nunca una fórmula
-                fila.append(celda)
-            hoja.append(fila)
-        buffer = io.BytesIO()
-        libro.save(buffer)
-        contenido = buffer.getvalue()
+    filas = query.order_by(Auditoria.fecha.desc(), Auditoria.id_auditoria.desc()).all()
+    nombre = f"auditoria_{local_now():%Y%m%d_%H%M}.pdf"
 
     registrar(db, "auditoria", "exportar", "bitácora",
-              f"Exportación de la auditoría a {formato.upper()}: {total} registro(s) ({filtros.resumen()}).",
+              f"Exportación de la auditoría a PDF: {total} registro(s) ({filtros.resumen()}).",
               referencia=nombre)
     db.commit()
-    return Response(
-        content=contenido.encode("utf-8") if isinstance(contenido, str) else contenido,
-        media_type=XLSX if formato == "xlsx" else "text/csv; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{nombre}"'},
-    )
+    return {"total": total, "items": [_leer(a) for a in filas]}

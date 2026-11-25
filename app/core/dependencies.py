@@ -49,7 +49,7 @@ def get_current_user(
 
 
 def require_roles(allowed_roles: list[str]):
-    """allowed_roles usa las claves internas 'admin' y 'cashier' (ver models.usuarios)."""
+    """allowed_roles usa las claves internas de rol (ver models.usuarios)."""
 
     def role_checker(current_user: Usuario = Depends(get_current_user)) -> Usuario:
         if current_user.rol not in allowed_roles:

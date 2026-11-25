@@ -9,7 +9,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.dates import day_bounds
+from app.core.dates import day_bounds, local_now
 from app.core.dependencies import require_roles
 from app.database.session import get_db
 from app.models.compras import Compra, FacturaImagen
@@ -19,7 +19,7 @@ from app.schemas.compras import FacturaRead
 router = APIRouter(
     prefix="/facturas",
     tags=["facturas"],
-    dependencies=[Depends(require_roles(["admin"]))],
+    dependencies=[Depends(require_roles(["admin", "gestor"]))],
 )
 
 # Tipo permitido -> (extensión, firma de los primeros bytes)
@@ -38,7 +38,14 @@ def facturas_dir() -> Path:
 
 
 def get_or_404(db: Session, id_factura_img: int) -> FacturaImagen:
-    factura = db.get(FacturaImagen, id_factura_img)
+    factura = (
+        db.query(FacturaImagen)
+        .filter(
+            FacturaImagen.id_factura_img == id_factura_img,
+            FacturaImagen.is_deleted.is_(False),
+        )
+        .first()
+    )
     if factura is None:
         raise HTTPException(status_code=404, detail="Factura no encontrada.")
     return factura
@@ -49,7 +56,7 @@ async def upload_invoice(
     archivo: UploadFile = File(...),
     id_compra: int | None = Form(default=None),
     db: Session = Depends(get_db),
-    admin: Usuario = Depends(require_roles(["admin"])),
+    admin: Usuario = Depends(require_roles(["admin", "gestor"])),
 ) -> FacturaImagen:
     allowed = ALLOWED_TYPES.get(archivo.content_type or "")
     if allowed is None:
@@ -91,9 +98,12 @@ async def upload_invoice(
 def list_invoices(
     desde: date | None = None,
     hasta: date | None = None,
+    incluir_eliminadas: bool = False,
     db: Session = Depends(get_db),
 ) -> list[FacturaImagen]:
     query = db.query(FacturaImagen)
+    if not incluir_eliminadas:
+        query = query.filter(FacturaImagen.is_deleted.is_(False))
     if desde is not None:
         query = query.filter(FacturaImagen.fecha_subida >= day_bounds(desde)[0])
     if hasta is not None:
@@ -102,8 +112,18 @@ def list_invoices(
 
 
 @router.get("/{id_factura_img}/archivo")
-def download_invoice(id_factura_img: int, db: Session = Depends(get_db)) -> FileResponse:
-    factura = get_or_404(db, id_factura_img)
+def download_invoice(
+    id_factura_img: int,
+    incluir_eliminadas: bool = False,
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    factura = (
+        db.query(FacturaImagen)
+        .filter(FacturaImagen.id_factura_img == id_factura_img)
+        .first()
+    )
+    if factura is None or (factura.is_deleted and not incluir_eliminadas):
+        raise HTTPException(status_code=404, detail="Factura no encontrada.")
     path = facturas_dir() / Path(factura.ruta_archivo).name
     if not path.is_file():
         raise HTTPException(status_code=404, detail="El archivo de la factura no existe en disco.")
@@ -111,9 +131,40 @@ def download_invoice(id_factura_img: int, db: Session = Depends(get_db)) -> File
 
 
 @router.delete("/{id_factura_img}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_invoice(id_factura_img: int, db: Session = Depends(get_db)) -> None:
+def delete_invoice(
+    id_factura_img: int,
+    db: Session = Depends(get_db),
+    admin: Usuario = Depends(require_roles(["admin"])),
+) -> None:
     factura = get_or_404(db, id_factura_img)
-    path = facturas_dir() / Path(factura.ruta_archivo).name
-    db.delete(factura)
+    factura.is_deleted = True
+    factura.fecha_eliminacion = local_now()
+    factura.id_usuario_eliminacion = admin.id_usuario
     db.commit()
-    path.unlink(missing_ok=True)
+
+
+@router.post("/{id_factura_img}/restaurar", response_model=FacturaRead)
+def restore_invoice(
+    id_factura_img: int,
+    db: Session = Depends(get_db),
+    _: Usuario = Depends(require_roles(["admin"])),
+) -> FacturaImagen:
+    factura = (
+        db.query(FacturaImagen)
+        .filter(
+            FacturaImagen.id_factura_img == id_factura_img,
+            FacturaImagen.is_deleted.is_(True),
+        )
+        .first()
+    )
+    if factura is None:
+        raise HTTPException(status_code=404, detail="Factura eliminada no encontrada.")
+    path = facturas_dir() / Path(factura.ruta_archivo).name
+    if not path.is_file():
+        raise HTTPException(status_code=409, detail="El archivo de la factura no existe en disco.")
+    factura.is_deleted = False
+    factura.fecha_eliminacion = None
+    factura.id_usuario_eliminacion = None
+    db.commit()
+    db.refresh(factura)
+    return factura

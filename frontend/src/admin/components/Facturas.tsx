@@ -1,9 +1,10 @@
 /** Facturas escaneadas: se suben al backend y se descargan las de la semana en un PDF. */
 import React from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { FileText, X } from 'lucide-react'
+import { FileText, RotateCcw, X } from 'lucide-react'
 import { facturasApi } from '@/api/endpoints'
 import { keys, useApiMutation } from '@/api/queries'
+import { useCurrentUser } from '@/auth/AuthContext'
 import type { Factura } from '@/api/types'
 import { ErrorBanner, Spinner, errorText, useToast } from '@/shared/components/ui'
 import { fmtFecha, iso, parseLocal, startOfWeek } from '@/shared/lib/dates'
@@ -14,7 +15,11 @@ const TIPOS = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
 
 /** Miniatura cargada con el token (los archivos no son públicos). */
 function useArchivoUrl(f: Factura) {
-  const q = useQuery({ queryKey: [...keys.facturas, 'archivo', f.id_factura_img], queryFn: () => facturasApi.archivo(f.id_factura_img), staleTime: Infinity })
+  const q = useQuery({
+    queryKey: [...keys.facturas, 'archivo', f.id_factura_img, f.is_deleted],
+    queryFn: () => facturasApi.archivo(f.id_factura_img, f.is_deleted),
+    staleTime: Infinity,
+  })
   const [url, setUrl] = React.useState<string | null>(null)
   React.useEffect(() => {
     if (!q.data) return
@@ -32,22 +37,29 @@ function Miniatura({ f, className }: { f: Factura; className: string }) {
 }
 
 export default function Facturas() {
+  const currentUser = useCurrentUser()
+  const isAdmin = currentUser.rol === 'admin'
   const toast = useToast()
   const inputRef = React.useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = React.useState(false)
   const [subiendo, setSubiendo] = React.useState(0)
   const [generando, setGenerando] = React.useState(false)
+  const [incluirEliminadas, setIncluirEliminadas] = React.useState(false)
   const lunes = startOfWeek(new Date())
   const domingo = new Date(lunes)
   domingo.setDate(lunes.getDate() + 6)
 
-  const facturas = useQuery({ queryKey: keys.facturas, queryFn: () => facturasApi.list() })
-  const semana = (facturas.data ?? []).filter(f => {
+  const facturas = useQuery({
+    queryKey: [...keys.facturas, incluirEliminadas],
+    queryFn: () => facturasApi.list({ incluir_eliminadas: incluirEliminadas }),
+  })
+  const semana = (facturas.data ?? []).filter(f => !f.is_deleted).filter(f => {
     const d = f.fecha_subida ? iso(parseLocal(f.fecha_subida)) : ''
     return d >= iso(lunes) && d <= iso(domingo)
   })
   const subir = useApiMutation((file: File) => facturasApi.upload(file), [keys.facturas])
-  const borrar = useApiMutation((f: Factura) => facturasApi.remove(f.id_factura_img), [keys.facturas], () => toast('Factura eliminada.'))
+  const borrar = useApiMutation((f: Factura) => facturasApi.remove(f.id_factura_img), [keys.facturas], () => toast('Factura archivada.'))
+  const restaurar = useApiMutation((f: Factura) => facturasApi.restore(f.id_factura_img), [keys.facturas], () => toast('Factura restaurada.'))
 
   const addFiles = async (files: FileList | null) => {
     if (!files) return
@@ -99,6 +111,9 @@ export default function Facturas() {
       <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
         <div className="card flex flex-col gap-4 !rounded-[14px] p-5">
           <div className="font-display text-[15px] font-bold">Subir facturas</div>
+          {isAdmin && <button className="btn-muted self-start !px-3 !py-1 text-xs" onClick={() => setIncluirEliminadas(value => !value)}>
+            {incluirEliminadas ? 'Ocultar archivadas' : 'Ver archivadas'}
+          </button>}
           <div role="button" tabIndex={0} onClick={() => inputRef.current?.click()} onKeyDown={e => { if (e.key === 'Enter') inputRef.current?.click() }}
             onDragOver={e => { e.preventDefault(); setDragging(true) }} onDragLeave={() => setDragging(false)}
             onDrop={e => { e.preventDefault(); setDragging(false); addFiles(e.dataTransfer.files) }}
@@ -118,10 +133,17 @@ export default function Facturas() {
                       <div className="truncate text-xs font-semibold">{f.nombre_original}</div>
                       <div className="text-[11px] text-muted-foreground">{f.fecha_subida ? parseLocal(f.fecha_subida).toLocaleDateString('es-VE') : ''} · {(f.tamano_bytes / 1024).toFixed(0)} KB</div>
                     </div>
-                    <button aria-label={`Eliminar ${f.nombre_original}`} className="btn-icon border-none bg-transparent text-danger"
-                      onClick={() => { if (window.confirm(`¿Eliminar ${f.nombre_original}?`)) borrar.mutate(f, { onError: e => toast(errorText(e), 'error') }) }}>
-                      <X size={15} />
-                    </button>
+                    {f.is_deleted ? isAdmin ? (
+                      <button aria-label={`Restaurar ${f.nombre_original}`} className="btn-icon border-none bg-transparent text-success"
+                        onClick={() => restaurar.mutate(f, { onError: e => toast(errorText(e), 'error') })}>
+                        <RotateCcw size={15} />
+                      </button>
+                    ) : null : isAdmin ? (
+                      <button aria-label={`Archivar ${f.nombre_original}`} className="btn-icon border-none bg-transparent text-danger"
+                        onClick={() => { if (window.confirm(`¿Archivar ${f.nombre_original}? El archivo se conservará.`)) borrar.mutate(f, { onError: e => toast(errorText(e), 'error') }) }}>
+                        <X size={15} />
+                      </button>
+                    ) : null}
                   </div>
                 ))}
               </div>

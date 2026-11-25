@@ -1,13 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from app.core.dates import local_now
 from app.core.dependencies import require_roles
 from app.core.security import hash_password
 from app.database.session import get_db
-from app.models.compras import Compra, FacturaImagen
 from app.models.usuarios import Usuario
-from app.models.ventas import Venta
 from app.schemas.usuarios import (
     PasswordReset,
     UsuarioCreate,
@@ -22,7 +21,11 @@ admin_only = require_roles(["admin"])
 
 
 def get_or_404(db: Session, id_usuario: int) -> Usuario:
-    user = db.query(Usuario).filter(Usuario.id_usuario == id_usuario).first()
+    user = (
+        db.query(Usuario)
+        .filter(Usuario.id_usuario == id_usuario, Usuario.is_deleted.is_(False))
+        .first()
+    )
     if user is None:
         raise HTTPException(status_code=404, detail="Usuario no encontrado.")
     return user
@@ -32,7 +35,9 @@ def ensure_not_last_admin(db: Session, user: Usuario) -> None:
     if user.rol != "admin" or not user.is_active:
         return
     active_admins = [
-        u for u in db.query(Usuario).filter(Usuario.estado == 1).all() if u.rol == "admin"
+        u for u in db.query(Usuario)
+        .filter(Usuario.estado == 1, Usuario.is_deleted.is_(False)).all()
+        if u.rol == "admin"
     ]
     if len(active_admins) <= 1:
         raise HTTPException(
@@ -51,8 +56,15 @@ def create_user(
 
 
 @router.get("/", response_model=list[UsuarioRead])
-def list_users(db: Session = Depends(get_db), _: Usuario = Depends(admin_only)) -> list[Usuario]:
-    return db.query(Usuario).order_by(Usuario.id_usuario).all()
+def list_users(
+    incluir_eliminados: bool = Query(default=False),
+    db: Session = Depends(get_db),
+    _: Usuario = Depends(admin_only),
+) -> list[Usuario]:
+    query = db.query(Usuario)
+    if not incluir_eliminados:
+        query = query.filter(Usuario.is_deleted.is_(False))
+    return query.order_by(Usuario.id_usuario).all()
 
 
 @router.put("/{id_usuario}", response_model=UsuarioRead)
@@ -121,19 +133,33 @@ def delete_user(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(admin_only),
 ) -> None:
-    """Solo borra usuarios sin historial; los demás deben desactivarse."""
+    """Archiva el usuario sin romper las referencias del historial."""
     user = get_or_404(db, id_usuario)
     if user.id_usuario == current_user.id_usuario:
         raise HTTPException(status_code=400, detail="No puedes eliminar tu propia cuenta.")
     ensure_not_last_admin(db, user)
-    has_history = any(
-        db.query(model).filter(model.id_usuario == user.id_usuario).first() is not None
-        for model in (Venta, Compra, FacturaImagen)
-    )
-    if has_history:
-        raise HTTPException(
-            status_code=409,
-            detail="El usuario tiene ventas o compras registradas; desactívelo en su lugar.",
-        )
-    db.delete(user)
+    user.is_deleted = True
+    user.fecha_eliminacion = local_now()
+    user.id_usuario_eliminacion = current_user.id_usuario
     db.commit()
+
+
+@router.post("/{id_usuario}/restaurar", response_model=UsuarioRead)
+def restore_user(
+    id_usuario: int,
+    db: Session = Depends(get_db),
+    _: Usuario = Depends(admin_only),
+) -> Usuario:
+    user = (
+        db.query(Usuario)
+        .filter(Usuario.id_usuario == id_usuario, Usuario.is_deleted.is_(True))
+        .first()
+    )
+    if user is None:
+        raise HTTPException(status_code=404, detail="Usuario eliminado no encontrado.")
+    user.is_deleted = False
+    user.fecha_eliminacion = None
+    user.id_usuario_eliminacion = None
+    db.commit()
+    db.refresh(user)
+    return user

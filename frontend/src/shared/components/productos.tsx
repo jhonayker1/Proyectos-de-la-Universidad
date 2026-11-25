@@ -13,9 +13,9 @@ export const MONEDAS_VISTA: { codigo: MonedaVista; label: string }[] = [
 ]
 
 /** Tasas vigentes (unidades por 1 USD) de VES y COP; null si no hay. */
-export function useTasas() {
-  const ves = useTasa('VES')
-  const cop = useTasa('COP')
+export function useTasas(enabled = true) {
+  const ves = useTasa('VES', enabled)
+  const cop = useTasa('COP', enabled)
   const tasas = {
     VES: ves.data ? num(ves.data.tasa_venta) : null,
     COP: cop.data ? num(cop.data.tasa_venta) : null,
@@ -82,28 +82,28 @@ export function FiltrosBar({ filtros, setFiltros, limpiar, children }: {
           <input className="input !bg-card !pl-8" placeholder="Nombre o SKU..." value={filtros.busqueda} onChange={e => setFiltros({ busqueda: e.target.value })} />
         </div>
       </label>
-      <label className="flex w-40 flex-col">
+      <label className="flex min-w-0 flex-[1_1_9rem] flex-col">
         <span className="label-caps">Categoría</span>
         <select className="input !bg-card" value={filtros.categoria} onChange={e => setFiltros({ categoria: e.target.value })}>
           <option value="">Todas</option>
           {categorias.data?.map(c => <option key={c.id_categoria} value={c.id_categoria}>{c.nombre}</option>)}
         </select>
       </label>
-      <label className="flex w-40 flex-col">
+      <label className="flex min-w-0 flex-[1_1_9rem] flex-col">
         <span className="label-caps">Marca</span>
         <select className="input !bg-card" value={filtros.marca} onChange={e => setFiltros({ marca: e.target.value })}>
           <option value="">Todas</option>
           {marcas.data?.map(m => <option key={m.id_marca} value={m.id_marca}>{m.nombre}</option>)}
         </select>
       </label>
-      <label className="flex w-36 flex-col">
+      <label className="flex min-w-0 flex-[1_1_8rem] flex-col">
         <span className="label-caps">Estado</span>
         <select className="input !bg-card" value={filtros.estado} onChange={e => setFiltros({ estado: e.target.value })}>
           <option value="">Todos</option>
           {ESTADOS_PRODUCTO.map(e => <option key={e} value={e}>{e}</option>)}
         </select>
       </label>
-      <div className="flex gap-2">
+      <div className="flex flex-wrap gap-2">
         <button className="btn-muted" onClick={limpiar}>Limpiar filtros</button>
         {children}
       </div>

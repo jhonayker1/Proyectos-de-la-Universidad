@@ -39,25 +39,27 @@ function TopTabla({ rows }: { rows: TopProducto[] }) {
   if (rows.length === 0) return <EmptyState title="Sin ventas en el período." />
   const max = Math.max(...rows.map(r => r.unidades), 1)
   return (
-    <table className="mt-3 w-full border-collapse text-xs">
-      <thead><tr className="border-b border-border">{['#', 'Producto', 'Categoría', 'Unidades vendidas', 'Total'].map(h => <th key={h} className="th !px-2.5 !py-1.5">{h}</th>)}</tr></thead>
-      <tbody>
-        {rows.map((r, i) => (
-          <tr key={r.id_producto} className={`border-b border-border ${i % 2 ? 'bg-muted' : 'bg-card'}`}>
-            <td className="px-2.5 py-2 font-bold text-primary">{i + 1}.</td>
-            <td className="px-2.5 py-2 font-medium">{r.nombre_producto}</td>
-            <td className="px-2.5 py-2 text-muted-foreground">{r.nombre_categoria ?? '—'}</td>
-            <td className="px-2.5 py-2">
-              <div className="flex items-center gap-2">
-                <div className="h-1.5 flex-1 overflow-hidden rounded bg-muted"><div className="h-full rounded bg-primary" style={{ width: `${(r.unidades / max) * 100}%` }} /></div>
-                <span className="min-w-7 font-bold">{r.unidades}</span>
-              </div>
-            </td>
-            <td className="px-2.5 py-2 font-semibold text-success">{usd(r.monto_total_usd)}</td>
-          </tr>
-        ))}
-      </tbody>
-    </table>
+    <div className="mt-3 overflow-x-auto">
+      <table className="w-full min-w-[560px] border-collapse text-xs">
+        <thead><tr className="border-b border-border">{['#', 'Producto', 'Categoría', 'Unidades vendidas', 'Total'].map(h => <th key={h} className="th !px-2.5 !py-1.5">{h}</th>)}</tr></thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={r.id_producto} className={`border-b border-border ${i % 2 ? 'bg-muted' : 'bg-card'}`}>
+              <td className="px-2.5 py-2 font-bold text-primary">{i + 1}.</td>
+              <td className="px-2.5 py-2 font-medium">{r.nombre_producto}</td>
+              <td className="px-2.5 py-2 text-muted-foreground">{r.nombre_categoria ?? '—'}</td>
+              <td className="px-2.5 py-2">
+                <div className="flex items-center gap-2">
+                  <div className="h-1.5 flex-1 overflow-hidden rounded bg-muted"><div className="h-full rounded bg-primary" style={{ width: `${(r.unidades / max) * 100}%` }} /></div>
+                  <span className="min-w-7 font-bold">{r.unidades}</span>
+                </div>
+              </td>
+              <td className="px-2.5 py-2 font-semibold text-success">{usd(r.monto_total_usd)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   )
 }
 
@@ -110,7 +112,7 @@ export default function Reportes() {
             <div className="mt-3.5 text-[13px] text-muted-foreground">Unidades que entraron por compras y salieron por ventas durante el mes actual.</div>
             <QueryState query={mov}>
               {m => (
-                <div className="mt-3.5 grid grid-cols-3 gap-3 text-center">
+                <div className="mt-3.5 grid grid-cols-1 gap-3 text-center min-[480px]:grid-cols-3">
                   <StatBox label="Entradas" value={m.entradas} color="#10b981" />
                   <StatBox label="Salidas" value={m.salidas} color="#f43f5e" />
                   <StatBox label="Neto" value={`${m.neto > 0 ? '+' : ''}${m.neto}`} color="#4f46e5" />

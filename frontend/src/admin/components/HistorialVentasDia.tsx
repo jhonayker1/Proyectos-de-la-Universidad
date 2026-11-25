@@ -4,27 +4,31 @@ import { Ban, Download } from 'lucide-react'
 import { ventasApi } from '@/api/endpoints'
 import { keys, useApiMutation } from '@/api/queries'
 import type { Venta } from '@/api/types'
+import { useCurrentUser } from '@/auth/AuthContext'
 import { useTasas } from '@/shared/components/productos'
 import { Badge, ConfirmDialog, EmptyState, ErrorBanner, QueryState, StatBox, errorText, useToast } from '@/shared/components/ui'
 import { fmtHora, todayIso } from '@/shared/lib/dates'
 import { fmtMoneda, usd } from '@/shared/lib/money'
 import { pdfHistorialDia, totalesVentas } from '@/shared/lib/pdf'
 
-export default function HistorialVentasDia() {
+export default function HistorialVentasDia({ dia: diaInicial, idUsuario }: { dia?: string; idUsuario?: number }) {
   const toast = useToast()
-  const { tasas } = useTasas()
-  const [dia, setDia] = React.useState(todayIso())
+  const isAdmin = useCurrentUser().rol === 'admin'
+  const { tasas } = useTasas(isAdmin)
+  const [diaLocal, setDiaLocal] = React.useState(todayIso())
+  const dia = diaInicial ?? diaLocal
   const [pdf, setPdf] = React.useState(false)
   const [anular, setAnular] = React.useState<Venta | null>(null)
   const ventas = useQuery({ queryKey: [...keys.ventas, 'dia', dia], queryFn: () => ventasApi.list({ dia, limite: 1000 }) })
   const anulacion = useApiMutation((v: Venta) => ventasApi.anular(v.id_venta), [keys.ventas, keys.productos, keys.reportes], v => {
     toast(`Venta ${v.numero_factura} anulada; el stock fue devuelto.`); setAnular(null)
   })
-  const t = totalesVentas(ventas.data ?? [])
+  const registros = (ventas.data ?? []).filter(v => idUsuario === undefined || v.id_usuario === idUsuario)
+  const t = totalesVentas(registros)
 
   const descargar = async () => {
     setPdf(true)
-    try { await pdfHistorialDia(ventas.data ?? [], tasas.VES) } catch (e) { toast(errorText(e), 'error') } finally { setPdf(false) }
+    try { await pdfHistorialDia(registros, tasas.VES) } catch (e) { toast(errorText(e), 'error') } finally { setPdf(false) }
   }
 
   return (
@@ -32,10 +36,10 @@ export default function HistorialVentasDia() {
       <div className="my-2.5 flex flex-wrap items-center justify-between gap-3">
         <h3 className="m-0 text-base font-bold">Historial de Ventas del Día</h3>
         <div className="flex items-center gap-2">
-          <input aria-label="Día" type="date" className="input !w-auto !bg-card" value={dia} max={todayIso()} onChange={e => e.target.value && setDia(e.target.value)} />
-          <button className="btn-primary shadow-md" onClick={descargar} disabled={pdf || t.ventas === 0}>
+          {!diaInicial && <input aria-label="Día" type="date" className="input !w-auto !bg-card" value={dia} max={todayIso()} onChange={e => e.target.value && setDiaLocal(e.target.value)} />}
+          {isAdmin && <button className="btn-primary shadow-md" onClick={descargar} disabled={pdf || t.ventas === 0}>
             <Download size={14} /> {pdf ? 'Generando...' : 'Descargar historial PDF'}
-          </button>
+          </button>}
         </div>
       </div>
       <div className="card overflow-hidden !rounded-[14px]">
@@ -45,7 +49,7 @@ export default function HistorialVentasDia() {
           <StatBox label="Total facturado" value={usd(t.usd)} color="#06b6d4" />
         </div>
         <QueryState query={ventas}>
-          {data => data.length === 0 ? <EmptyState title="No hay ventas registradas ese día." /> : (
+          {() => registros.length === 0 ? <EmptyState title="No hay ventas registradas ese día." /> : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[820px] border-collapse text-[13px]">
                 <thead>
@@ -54,7 +58,7 @@ export default function HistorialVentasDia() {
                   </tr>
                 </thead>
                 <tbody>
-                  {data.map(v => (
+                  {registros.map(v => (
                     <tr key={v.id_venta} className={`border-t border-border ${v.estado === 'Anulada' ? 'opacity-60' : ''}`}>
                       <td className="td font-bold text-primary">{v.numero_factura}</td>
                       <td className="td text-muted-foreground">{fmtHora(v.fecha_venta)}</td>
@@ -69,7 +73,7 @@ export default function HistorialVentasDia() {
                       <td className="td text-[#6366f1]">{v.nombre_usuario}</td>
                       <td className="td"><Badge>{v.estado}</Badge></td>
                       <td className="td">
-                        {v.estado !== 'Anulada' && (
+                        {isAdmin && v.estado !== 'Anulada' && (
                           <button className="btn-muted !px-2.5 !py-1 text-[11px] text-danger" onClick={() => setAnular(v)}><Ban size={12} /> Anular</button>
                         )}
                       </td>

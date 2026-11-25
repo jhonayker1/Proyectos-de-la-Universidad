@@ -1,12 +1,13 @@
 /** Bitácora de auditoría: solo consulta y exportación (no se puede editar ni borrar). */
 import React from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import { ChevronDown, Download, FileSpreadsheet, Lock, Search, X } from 'lucide-react'
-import { saveBlob } from '@/api/client'
+import { ChevronDown, Download, Lock, Search, X } from 'lucide-react'
 import { auditoriaApi } from '@/api/endpoints'
+import { useCurrentUser } from '@/auth/AuthContext'
 import type { FiltroAuditoria, RegistroAuditoria } from '@/api/types'
 import { Badge, EmptyState, ErrorBanner, Pagination, Spinner, cx } from '@/shared/components/ui'
 import { fmtFechaHora } from '@/shared/lib/dates'
+import { pdfAuditoria } from '@/shared/lib/pdf'
 
 const POR_PAGINA = 50
 
@@ -24,28 +25,30 @@ function Detalle({ r, verOperacion }: { r: RegistroAuditoria; verOperacion: (id:
   const conDespues = r.cambios.some(c => c.despues !== null)
   const dos = conAntes && conDespues
   return (
-    <div className="grid gap-4 bg-muted/60 px-5 py-4 md:grid-cols-[1.6fr_1fr]">
+    <div className="grid gap-4 bg-muted/60 px-5 py-4 xl:grid-cols-[1.6fr_1fr]">
       <div>
         <div className="label-caps">{dos ? 'Cambios' : conAntes ? 'Valores que tenía' : 'Valores registrados'}</div>
         {r.cambios.length === 0 ? <div className="text-xs text-muted-foreground">Sin detalle de campos.</div> : (
-          <table className="w-full border-collapse overflow-hidden rounded-lg bg-card text-[12.5px]">
-            <thead><tr className="bg-muted">
-              {['Campo', ...(dos ? ['Antes', 'Después'] : ['Valor'])].map(h => <th key={h} className="th !py-1.5">{h}</th>)}
-            </tr></thead>
-            <tbody>
-              {r.cambios.map(c => (
-                <tr key={c.campo} className="border-t border-border">
-                  <td className="td !py-1.5 font-semibold">{c.etiqueta}</td>
-                  {dos ? <>
-                    <td className="td !py-1.5">{c.antes === null ? VACIO : <span className="text-danger/80 line-through decoration-danger/40">{c.antes}</span>}</td>
-                    <td className="td !py-1.5">{c.despues === null ? VACIO : <span className="font-semibold text-success">{c.despues}</span>}</td>
-                  </> : (
-                    <td className="td !py-1.5">{(conAntes ? c.antes : c.despues) ?? VACIO}</td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="overflow-x-auto rounded-lg">
+            <table className="w-full border-collapse bg-card text-[12.5px]">
+              <thead><tr className="bg-muted">
+                {['Campo', ...(dos ? ['Antes', 'Después'] : ['Valor'])].map(h => <th key={h} className="th !py-1.5">{h}</th>)}
+              </tr></thead>
+              <tbody>
+                {r.cambios.map(c => (
+                  <tr key={c.campo} className="border-t border-border">
+                    <td className="td !py-1.5 font-semibold">{c.etiqueta}</td>
+                    {dos ? <>
+                      <td className="td !py-1.5">{c.antes === null ? VACIO : <span className="text-danger/80 line-through decoration-danger/40">{c.antes}</span>}</td>
+                      <td className="td !py-1.5">{c.despues === null ? VACIO : <span className="font-semibold text-success">{c.despues}</span>}</td>
+                    </> : (
+                      <td className="td !py-1.5">{(conAntes ? c.antes : c.despues) ?? VACIO}</td>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
       <dl className="m-0 grid grid-cols-[auto_1fr] content-start gap-x-3 gap-y-1.5 text-xs">
@@ -74,11 +77,13 @@ function Detalle({ r, verOperacion }: { r: RegistroAuditoria; verOperacion: (id:
 }
 
 export default function Auditoria() {
+  const usuario = useCurrentUser()
+  const isAdmin = usuario.rol === 'admin'
   const [filtro, setFiltro] = React.useState<FiltroAuditoria>({})
   const [texto, setTexto] = React.useState('')
   const [pagina, setPagina] = React.useState(1)
   const [abierto, setAbierto] = React.useState<number | null>(null)
-  const [exportando, setExportando] = React.useState<'' | 'xlsx' | 'csv'>('')
+  const [exportando, setExportando] = React.useState(false)
   const [errorExportar, setErrorExportar] = React.useState<unknown>(null)
 
   // La búsqueda se aplica al dejar de escribir.
@@ -106,15 +111,29 @@ export default function Auditoria() {
   const limpiar = () => { setTexto(''); setFiltro({}) }
   const hayFiltros = Object.values(filtro).some(v => v !== undefined && v !== '')
 
-  async function exportar(formato: 'xlsx' | 'csv') {
-    setExportando(formato); setErrorExportar(null)
+  async function exportar() {
+    setExportando(true); setErrorExportar(null)
     try {
-      const fecha = new Date().toISOString().slice(0, 10)
-      saveBlob(await auditoriaApi.exportar(formato, filtro), `auditoria_${fecha}.${formato}`)
+      const resultado = await auditoriaApi.exportar(filtro)
+      const nombreModulo = opciones.data?.modulos.find(o => o.clave === filtro.modulo)?.etiqueta ?? filtro.modulo
+      const nombreAccion = opciones.data?.acciones.find(o => o.clave === filtro.accion)?.etiqueta ?? filtro.accion
+      const nombreUsuario = opciones.data?.usuarios.find(o => o.id_usuario === filtro.id_usuario)?.nombre
+        ?? (filtro.id_usuario === 0 ? 'Sistema' : filtro.id_usuario)
+      const fecha = (valor: string) => new Date(`${valor}T00:00:00`).toLocaleDateString('es-VE')
+      const filtrosAplicados = [
+        filtro.desde && `Desde: ${fecha(filtro.desde)}`,
+        filtro.hasta && `Hasta: ${fecha(filtro.hasta)}`,
+        nombreModulo && `Módulo: ${nombreModulo}`,
+        nombreAccion && `Acción: ${nombreAccion}`,
+        nombreUsuario !== undefined && `Usuario: ${nombreUsuario}`,
+        filtro.id_operacion && `Operación: ${filtro.id_operacion}`,
+        filtro.buscar && `Búsqueda: ${filtro.buscar}`,
+      ].filter(Boolean).join(' · ') || 'ninguno (todos los registros)'
+      await pdfAuditoria(resultado.items, usuario.nombre_completo, filtrosAplicados)
     } catch (e) {
       setErrorExportar(e)
     } finally {
-      setExportando('')
+      setExportando(false)
     }
   }
 
@@ -131,22 +150,21 @@ export default function Auditoria() {
             <div>
               <h2 className="m-0 text-base font-bold">Registro de cambios</h2>
               <p className="m-0 mt-0.5 max-w-2xl text-xs text-muted-foreground">
-                Quién cambió qué y cuándo en inventario, catálogos, proveedores, usuarios, tasas, ventas, compras e importaciones.
+                {isAdmin
+                  ? 'Quién cambió qué y cuándo en inventario, catálogos, proveedores, usuarios, tasas, ventas, compras e importaciones.'
+                  : 'Quién cambió qué y cuándo en inventario, catálogos, proveedores y compras.'}
                 Es de solo lectura: nadie puede modificar ni borrar estos registros.
               </p>
             </div>
           </div>
-          <div className="flex gap-2">
-            <button className="btn-muted" disabled={exportando !== '' || total === 0} onClick={() => exportar('xlsx')}>
-              <FileSpreadsheet size={14} /> {exportando === 'xlsx' ? 'Exportando…' : 'Exportar Excel'}
+          {isAdmin && <div className="flex gap-2">
+            <button className="btn-muted" disabled={exportando || total === 0} onClick={() => exportar()}>
+              <Download size={14} /> {exportando ? 'Exportando…' : 'Exportar PDF'}
             </button>
-            <button className="btn-muted" disabled={exportando !== '' || total === 0} onClick={() => exportar('csv')}>
-              <Download size={14} /> {exportando === 'csv' ? 'Exportando…' : 'CSV'}
-            </button>
-          </div>
+          </div>}
         </div>
 
-        <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-[repeat(5,minmax(0,1fr))_minmax(0,1.6fr)]">
+        <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-[repeat(5,minmax(0,1fr))_minmax(0,1.6fr)]">
           <label><span className="label-caps">Desde</span>
             <input type="date" className="input" value={filtro.desde ?? ''} max={filtro.hasta} onChange={sel('desde')} /></label>
           <label><span className="label-caps">Hasta</span>
@@ -187,11 +205,11 @@ export default function Auditoria() {
       </div>
 
       <div className="card flex min-h-0 flex-1 flex-col overflow-hidden">
-        <div className="flex-1 overflow-auto">
+        <div className="min-h-0 min-w-0 flex-1 overflow-auto">
           {datos.isLoading ? <Spinner label="Cargando auditoría..." /> : datos.error ? (
             <div className="p-4"><ErrorBanner error={datos.error} onRetry={() => datos.refetch()} /></div>
           ) : (
-            <table className={cx('w-full border-collapse text-[13px]', datos.isFetching && 'opacity-60')}>
+            <table className={cx('w-full min-w-[900px] border-collapse text-[13px]', datos.isFetching && 'opacity-60')}>
               <thead className="sticky top-0 z-10">
                 <tr className="border-b-2 border-border bg-muted">
                   {['Fecha y hora', 'Usuario', 'Módulo', 'Acción', 'Descripción', ''].map(h => <th key={h} className="th">{h}</th>)}
@@ -236,7 +254,7 @@ export default function Auditoria() {
             </table>
           )}
         </div>
-        <div className="flex shrink-0 items-center justify-between gap-3 border-t border-border px-5 py-3.5">
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-border px-3 py-3.5 sm:px-5">
           <span className="text-xs text-muted-foreground">{total.toLocaleString('es-VE')} registro{total === 1 ? '' : 's'} · más recientes primero</span>
           <Pagination page={pagina} total={Math.max(1, Math.ceil(total / POR_PAGINA))} onChange={p => { setPagina(p); setAbierto(null) }} />
         </div>

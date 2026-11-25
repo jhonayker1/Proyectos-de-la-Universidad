@@ -5,14 +5,20 @@ import type {
   Categoria,
   Compra,
   CompraCreate,
+  CuentasPorPagar,
   Dashboard,
   EntradaStock,
+  AjusteStock,
+  AjusteStockInput,
+  ExportacionAuditoria,
   Factura,
   FiltroAuditoria,
   FiltrosAuditoriaOpciones,
   Marca,
   Moneda,
+  MovimientoInventario,
   MovimientosStock,
+  Kardex,
   OpcionesImportacion,
   PaginaAuditoria,
   Producto,
@@ -21,6 +27,8 @@ import type {
   Proveedor,
   PuntoSerie,
   ResultadoImportacion,
+  ReporteVentas,
+  ResumenGestor,
   ResumenVentas,
   StockCategoria,
   Tasa,
@@ -45,12 +53,13 @@ export const authApi = {
 }
 
 export const usuariosApi = {
-  list: () => api.get<Usuario[]>('/usuarios/'),
+  list: (q: { incluir_eliminados?: boolean } = {}) => api.get<Usuario[]>('/usuarios/', q),
   create: (data: UsuarioCreate) => api.post<Usuario>('/usuarios/', data),
   update: (id: number, data: UsuarioUpdate) => api.put<Usuario>(`/usuarios/${id}`, data),
   setActivo: (id: number, activo: boolean) => api.patch<Usuario>(`/usuarios/${id}/estado`, { activo }),
   resetPassword: (id: number, password: string) => api.patch<void>(`/usuarios/${id}/password`, { password }),
   remove: (id: number) => api.delete(`/usuarios/${id}`),
+  restore: (id: number) => api.post<Usuario>(`/usuarios/${id}/restaurar`),
 }
 
 export const categoriasApi = {
@@ -80,7 +89,8 @@ export const proveedoresApi = {
 export const productosApi = {
   list: (q: { buscar?: string; id_categoria?: number; id_marca?: number } = {}) =>
     api.get<Producto[]>('/productos/', q),
-  listAdmin: () => api.get<ProductoAdmin[]>('/productos/admin'),
+  listAdmin: (incluir_eliminados = false) =>
+    api.get<ProductoAdmin[]>('/productos/admin', { incluir_eliminados }),
   stockBajo: () => api.get<ProductoAdmin[]>('/productos/stock-bajo'),
   /** Vista previa del SKU que recibirá un producto nuevo de la categoría. */
   siguienteSku: (id_categoria: number) =>
@@ -88,6 +98,9 @@ export const productosApi = {
   create: (data: ProductoInput) => api.post<ProductoAdmin>('/productos/', data),
   update: (id: number, data: Partial<ProductoInput>) => api.put<ProductoAdmin>(`/productos/${id}`, data),
   remove: (id: number) => api.delete(`/productos/${id}`),
+  restore: (id: number) => api.post<ProductoAdmin>(`/productos/${id}/restaurar`),
+  ajustar: (id: number, data: AjusteStockInput) => api.post<AjusteStock>(`/productos/${id}/ajustes-stock`, data),
+  ajustes: (q: { limite?: number } = {}) => api.get<AjusteStock[]>('/productos/ajustes-stock', q),
 }
 
 function formularioImportacion(archivo: File, op: OpcionesImportacion) {
@@ -106,11 +119,7 @@ function formularioImportacion(archivo: File, op: OpcionesImportacion) {
 export const auditoriaApi = {
   list: (f: FiltroAuditoria & { pagina: number; por_pagina: number }) => api.get<PaginaAuditoria>('/auditoria/', f),
   filtros: () => api.get<FiltrosAuditoriaOpciones>('/auditoria/filtros'),
-  exportar: (formato: 'xlsx' | 'csv', f: FiltroAuditoria) => {
-    const qs = new URLSearchParams({ formato })
-    for (const [k, v] of Object.entries(f)) if (v !== undefined && v !== '') qs.set(k, String(v))
-    return api.blob(`/auditoria/exportar?${qs}`)
-  },
+  exportar: (f: FiltroAuditoria) => api.get<ExportacionAuditoria>('/auditoria/exportar', { ...f, formato: 'pdf' }),
 }
 
 /** Carga masiva desde Excel/CSV: validar (vista previa), estricto (todo o nada) o parcial. */
@@ -148,15 +157,17 @@ export const comprasApi = {
 }
 
 export const facturasApi = {
-  list: (q: Rango = {}) => api.get<Factura[]>('/facturas/', q),
+  list: (q: Rango & { incluir_eliminadas?: boolean } = {}) => api.get<Factura[]>('/facturas/', q),
   upload: (archivo: File, id_compra?: number) => {
     const form = new FormData()
     form.append('archivo', archivo)
     if (id_compra) form.append('id_compra', String(id_compra))
     return api.post<Factura>('/facturas/', form)
   },
-  archivo: (id: number) => api.blob(`/facturas/${id}/archivo`),
+  archivo: (id: number, incluirEliminadas = false) =>
+    api.blob(`/facturas/${id}/archivo${incluirEliminadas ? '?incluir_eliminadas=true' : ''}`),
   remove: (id: number) => api.delete(`/facturas/${id}`),
+  restore: (id: number) => api.post<Factura>(`/facturas/${id}/restaurar`),
 }
 
 export const reportesApi = {
@@ -166,4 +177,11 @@ export const reportesApi = {
   stockPorCategoria: () => api.get<StockCategoria[]>('/reportes/stock-por-categoria'),
   movimientosStock: (q: Rango = {}) => api.get<MovimientosStock>('/reportes/movimientos-stock', q),
   ventasPorCategoria: (q: Rango = {}) => api.get<VentasCategoria[]>('/reportes/ventas-por-categoria', q),
+  resumenGestor: () => api.get<ResumenGestor>('/reportes/gestor/resumen'),
+  ventasDia: (dia: string) => api.get<ReporteVentas>('/reportes/gestor/ventas-dia', { dia }),
+  cuentasPorPagar: () => api.get<CuentasPorPagar>('/reportes/gestor/cuentas-por-pagar'),
+  movimientos: (q: Rango & { id_producto?: number; limite?: number } = {}) =>
+    api.get<Kardex>('/reportes/gestor/kardex', q),
+  movimientosExcel: (q: Rango & { id_producto?: number; tipo?: MovimientoInventario['tipo'] | 'todos'; limite?: number } = {}) =>
+    api.blob('/reportes/gestor/kardex/exportar', q),
 }

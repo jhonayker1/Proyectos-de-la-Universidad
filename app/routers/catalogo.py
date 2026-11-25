@@ -41,9 +41,13 @@ def build_catalog_router(
     after_update: Callable[[Session, object, dict], None] | None = None,
     before_delete: Callable[[Session, object], None] | None = None,
     before_create: Callable[[Session, dict], None] | None = None,
+    write_roles: list[str] | None = None,
+    delete_roles: list[str] | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix=prefix, tags=["catalogo"])
     pk = getattr(model, pk_name)
+    write_roles = write_roles or ["admin"]
+    delete_roles = delete_roles or ["admin"]
 
     def get_or_404(db: Session, item_id: int):
         item = db.query(model).filter(pk == item_id).first()
@@ -62,7 +66,7 @@ def build_catalog_router(
     def list_items(
         incluir_inactivos: bool = Query(default=False),
         db: Session = Depends(get_db),
-        _: Usuario = Depends(require_roles(["admin", "cashier"])),
+        _: Usuario = Depends(require_roles(["admin", "gestor", "cashier"])),
     ):
         query = db.query(model)
         if not incluir_inactivos:
@@ -73,7 +77,7 @@ def build_catalog_router(
     def create_item(
         item_in: create_schema,
         db: Session = Depends(get_db),
-        _: Usuario = Depends(require_roles(["admin"])),
+        _: Usuario = Depends(require_roles(write_roles)),
     ):
         values = item_in.model_dump()
         values["nombre"] = values["nombre"].strip()
@@ -90,7 +94,7 @@ def build_catalog_router(
         item_id: int,
         item_in: update_schema,
         db: Session = Depends(get_db),
-        _: Usuario = Depends(require_roles(["admin"])),
+        _: Usuario = Depends(require_roles(write_roles)),
     ):
         item = get_or_404(db, item_id)
         values = item_in.model_dump(exclude_unset=True)
@@ -113,7 +117,7 @@ def build_catalog_router(
     def deactivate_item(
         item_id: int,
         db: Session = Depends(get_db),
-        _: Usuario = Depends(require_roles(["admin"])),
+        _: Usuario = Depends(require_roles(delete_roles)),
     ) -> None:
         item = get_or_404(db, item_id)
         if before_delete is not None:
@@ -130,6 +134,7 @@ def ensure_category_without_stock(db: Session, categoria: Categoria) -> None:
         db.query(Producto)
         .filter(
             Producto.id_categoria == categoria.id_categoria,
+            Producto.is_deleted.is_(False),
             Producto.estado != PRODUCTO_INACTIVO,
             Producto.stock_actual > 0,
         )
@@ -205,4 +210,5 @@ proveedores_router = build_catalog_router(
     # RIF, teléfono y correo son obligatorios: al editar no se pueden borrar (null).
     required_on_update=frozenset({"nombre", "estado", "rif", "telefono", "correo"}),
     before_delete=ensure_no_pending_purchases,
+    write_roles=["admin", "gestor"],
 )

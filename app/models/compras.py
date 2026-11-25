@@ -1,4 +1,15 @@
-from sqlalchemy import Column, Date, DateTime, ForeignKey, Integer, Numeric, SmallInteger, String
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Column,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    Numeric,
+    SmallInteger,
+    String,
+)
 from sqlalchemy.orm import relationship
 
 from app.core.dates import local_now
@@ -60,3 +71,14 @@ class FacturaImagen(Base):
     )
     id_usuario = Column(Integer, ForeignKey("usuarios.id_usuario"), nullable=False)
     fecha_subida = Column(DateTime, nullable=True, default=local_now)
+    is_deleted = Column(Boolean, nullable=False, default=False, server_default="false")
+    fecha_eliminacion = Column(DateTime, nullable=True)
+    id_usuario_eliminacion = Column(Integer, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "(is_deleted AND fecha_eliminacion IS NOT NULL) OR "
+            "(NOT is_deleted AND fecha_eliminacion IS NULL)",
+            name="ck_facturas_imagenes_soft_delete",
+        ),
+    )

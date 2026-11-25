@@ -23,6 +23,7 @@ from app.routers import (
     importacion,
     productos,
     reportes,
+    reportes_gestor,
     usuarios,
     ventas,
 )
@@ -84,7 +85,7 @@ app = FastAPI(
     version="3.0.0",
     description=(
         "API de inventario y ventas de repuestos con precios en USD, conversión a "
-        "moneda local según una tasa manual y roles de administrador y cajero."
+        "moneda local según una tasa manual y roles de administrador, gestor y cajero."
     ),
     lifespan=lifespan,
 )
@@ -110,6 +111,7 @@ app.include_router(ventas.router)
 app.include_router(compras.router)
 app.include_router(facturas.router)
 app.include_router(reportes.router)
+app.include_router(reportes_gestor.router)
 app.include_router(auditoria.router)
 
 

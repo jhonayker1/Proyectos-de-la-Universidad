@@ -1,6 +1,6 @@
 import React from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
-import { BarChart2, LayoutDashboard, Package, ShieldCheck, ShoppingCart, Tags, Truck, Users } from 'lucide-react'
+import { BarChart2, ClipboardList, LayoutDashboard, Package, PackagePlus, ShieldCheck, ShoppingCart, Tags, Truck, Users } from 'lucide-react'
 import { homeFor, useAuth } from '@/auth/AuthContext'
 import LoginPage from '@/auth/LoginPage'
 import RecuperarPage from '@/auth/RecuperarPage'
@@ -20,6 +20,11 @@ const Auditoria = React.lazy(() => import('@/admin/pages/Auditoria'))
 const PuntoVenta = React.lazy(() => import('@/cajero/pages/PuntoVenta'))
 const CajeroInventario = React.lazy(() => import('@/cajero/pages/Inventario'))
 const MisVentas = React.lazy(() => import('@/cajero/pages/MisVentas'))
+const GestorDashboard = React.lazy(() => import('@/gestor/pages/Dashboard'))
+const GestorEntradas = React.lazy(() => import('@/gestor/pages/Entradas'))
+const GestorReportes = React.lazy(() => import('@/gestor/pages/Reportes'))
+const GestorInventario = React.lazy(() => import('@/gestor/pages/Inventario'))
+const GestorProveedores = React.lazy(() => import('@/admin/pages/Proveedores'))
 const AcercaDe = React.lazy(() => import('@/shared/pages/AcercaDe'))
 
 const ADMIN_NAV: NavItem[] = [
@@ -36,6 +41,14 @@ const CAJERO_NAV: NavItem[] = [
   { to: '', label: 'Punto de venta', icon: ShoppingCart },
   { to: 'inventario', label: 'Inventario', icon: Package },
   { to: 'ventas', label: 'Mis ventas', icon: BarChart2 },
+]
+
+const GESTOR_NAV: NavItem[] = [
+  { to: '', label: 'Inicio', icon: LayoutDashboard },
+  { to: 'inventario', label: 'Inventario', icon: Package },
+  { to: 'entradas', label: 'Entradas', icon: PackagePlus },
+  { to: 'proveedores', label: 'Proveedores', icon: Truck },
+  { to: 'reportes', label: 'Reportes', icon: ClipboardList },
 ]
 
 function Home() {
@@ -66,6 +79,16 @@ export default function App() {
           <Route index element={<PuntoVenta />} />
           <Route path="inventario" element={<CajeroInventario />} />
           <Route path="ventas" element={<MisVentas />} />
+          <Route path="acerca" element={<AcercaDe />} />
+        </Route>
+      </Route>
+      <Route element={<RequireRole rol="gestor" />}>
+        <Route path="/gestor" element={<AppLayout items={GESTOR_NAV} base="/gestor" subtitle="Panel de gestor" />}>
+          <Route index element={<GestorDashboard />} />
+          <Route path="inventario" element={<GestorInventario />} />
+          <Route path="entradas" element={<GestorEntradas />} />
+          <Route path="proveedores" element={<GestorProveedores />} />
+          <Route path="reportes" element={<GestorReportes />} />
           <Route path="acerca" element={<AcercaDe />} />
         </Route>
       </Route>

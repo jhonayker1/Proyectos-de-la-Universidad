@@ -1,5 +1,6 @@
 from datetime import datetime
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -78,6 +79,40 @@ class ProductoRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class AjusteStockCreate(BaseModel):
+    """sumar/restar: unidades; conteo: stock físico contado (puede ser 0)."""
+
+    tipo: Literal["sumar", "restar", "conteo"]
+    cantidad: int = Field(ge=0, le=1_000_000)
+    motivo: Literal["conteo", "merma", "devolucion", "otro"]
+    observacion: str = Field(min_length=3, max_length=255)
+
+    @model_validator(mode="after")
+    def revisar(self) -> "AjusteStockCreate":
+        self.observacion = " ".join(self.observacion.split())
+        if len(self.observacion) < 3:
+            raise ValueError("Explique el motivo del ajuste (al menos 3 caracteres).")
+        if self.tipo != "conteo" and self.cantidad == 0:
+            raise ValueError("La cantidad a sumar o restar debe ser mayor que 0.")
+        return self
+
+
+class AjusteStockRead(BaseModel):
+    id_ajuste: int
+    id_producto: int
+    sku: str
+    nombre_producto: str
+    cantidad: int
+    stock_anterior: int
+    stock_nuevo: int
+    motivo: str
+    motivo_etiqueta: str
+    observacion: str
+    id_usuario: int
+    nombre_usuario: str
+    fecha: datetime
+
+
 class ProductoAdminRead(ProductoRead):
     id_proveedor: int | None
     nombre_proveedor: str | None = None
@@ -86,3 +121,5 @@ class ProductoAdminRead(ProductoRead):
     # Margen que se aplica de verdad (el propio o el de la categoría).
     margen_efectivo: Decimal | None = None
     fecha_ingreso: datetime | None
+    is_deleted: bool = False
+    fecha_eliminacion: datetime | None = None

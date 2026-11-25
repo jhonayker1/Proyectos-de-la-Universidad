@@ -3,8 +3,9 @@
  * Une los dos generadores que estaban duplicados en Admin/src/pdfLayout.ts y Cajero/InventoryApp.tsx.
  */
 import logoPdf from '@/assets/logo-pdf.png'
-import type { Venta } from '@/api/types'
+import type { RegistroAuditoria, Venta } from '@/api/types'
 import { fmtFechaLarga, fmtHora, iso, parseLocal } from './dates'
+import { saveBlob } from './downloads'
 import { fmtMoneda, num } from './money'
 
 type RGB = [number, number, number]
@@ -108,6 +109,89 @@ function totalFinal(pdf: Doc, y: number, texto: string) {
   pdf.text(texto, 56, y + 19)
 }
 
+function tablaAuditoria(pdf: Doc, y: number, registros: RegistroAuditoria[]) {
+  const W = pdf.internal.pageSize.getWidth()
+  const H = pdf.internal.pageSize.getHeight()
+  const M = 40
+  const anchos = [100, 120, 100, 100, W - 2 * M - 420]
+  const titulos = ['Fecha y hora', 'Usuario', 'Módulo', 'Acción', 'Descripción del cambio']
+  const altoLinea = 9
+
+  function encabezado(yy: number) {
+    pdf.setFillColor(79, 70, 229)
+    pdf.roundedRect(M, yy, W - 2 * M, 24, 5, 5, 'F')
+    pdf.setTextColor(255)
+    pdf.setFont('helvetica', 'bold')
+    pdf.setFontSize(8.5)
+    let x = M
+    titulos.forEach((titulo, i) => {
+      pdf.text(titulo, x + 6, yy + 15)
+      x += anchos[i]
+    })
+    return yy + 24
+  }
+
+  function envolver(texto: string, ancho: number) {
+    pdf.setFont('helvetica', 'normal')
+    pdf.setFontSize(8.5)
+    return pdf.splitTextToSize(texto, ancho - 12) as string[]
+  }
+
+  function pintarLineas(lineas: string[], x: number, yy: number, fuente: 'normal' | 'bold', tamano: number, color: RGB) {
+    pdf.setFont('helvetica', fuente)
+    pdf.setFontSize(tamano)
+    pdf.setTextColor(...color)
+    lineas.forEach((linea, i) => pdf.text(linea, x + 6, yy + 11 + i * altoLinea))
+  }
+
+  y = encabezado(y)
+  registros.forEach((r, indice) => {
+    const fecha = parseLocal(r.fecha)
+    const fechaLineas = [
+      fecha.toLocaleDateString('es-VE'),
+      fecha.toLocaleTimeString('es-VE', { hour: '2-digit', minute: '2-digit', hour12: false }),
+    ]
+    const usuarioLineas = envolver(r.nombre_usuario, anchos[1])
+    const rolLineas = r.rol ? envolver(r.rol, anchos[1]) : []
+    const moduloLineas = envolver(r.modulo_etiqueta, anchos[2])
+    const accionLineas = envolver(r.accion_etiqueta, anchos[3])
+    const descripcionLineas = envolver(r.descripcion, anchos[4])
+    const origenLineas = r.origen ? envolver(`Origen: ${r.origen}`, anchos[4]) : []
+    const cantidadLineas = Math.max(
+      fechaLineas.length,
+      usuarioLineas.length + rolLineas.length,
+      moduloLineas.length,
+      accionLineas.length,
+      descripcionLineas.length + origenLineas.length,
+    )
+    const altoFila = Math.max(30, cantidadLineas * altoLinea + 8)
+    if (y + altoFila > H - 48) {
+      pdf.addPage()
+      y = encabezado(40)
+    }
+
+    const fondo: RGB = indice % 2 === 0 ? [255, 255, 255] : [246, 248, 252]
+    pdf.setFillColor(...fondo)
+    pdf.rect(M, y, W - 2 * M, altoFila, 'F')
+    let x = M
+    pintarLineas(fechaLineas, x, y, 'normal', 7.5, MUTED)
+    x += anchos[0]
+    pintarLineas(usuarioLineas, x, y, 'bold', 8, INK)
+    pintarLineas(rolLineas, x, y + usuarioLineas.length * altoLinea, 'normal', 7.5, MUTED)
+    x += anchos[1]
+    pintarLineas(moduloLineas, x, y, 'normal', 7.8, INK)
+    x += anchos[2]
+    pintarLineas(accionLineas, x, y, 'bold', 7.8, INK)
+    x += anchos[3]
+    pintarLineas(descripcionLineas, x, y, 'normal', 7.8, INK)
+    pintarLineas(origenLineas, x, y + descripcionLineas.length * altoLinea, 'normal', 7.2, MUTED)
+    pdf.setDrawColor(232, 236, 243)
+    pdf.setLineWidth(0.5)
+    pdf.line(M, y + altoFila, W - M, y + altoFila)
+    y += altoFila
+  })
+}
+
 const nombreCorto = (n: string | null) => {
   const [a, b] = (n ?? '').split(' ')
   return `${a ?? ''} ${b ? `${b[0]}.` : ''}`.trim()
@@ -148,7 +232,7 @@ export async function pdfHistorialDia(ventas: Venta[], tasaBs: number | null) {
   const bs = tasaBs ? `  ·  ${fmtMoneda(t.usd * tasaBs, 'VES')}` : ''
   totalFinal(pdf, y, `Total facturado: ${fmtMoneda(t.usd, 'USD')}${bs}`)
   pies(pdf)
-  pdf.save(`historial-ventas-${iso(ahora)}.pdf`)
+  await saveBlob(pdf.output('blob'), `historial-ventas-${iso(ahora)}.pdf`)
 }
 
 export type DiaRespaldo = { fecha: Date; ventas: number; unidades: number; totalUSD: number }
@@ -195,7 +279,7 @@ export async function pdfRespaldo(modo: string, ini: Date, fin: Date, dias: DiaR
   const bs = tasaBs ? `  ·  ${fmtMoneda(totalUSD * tasaBs, 'VES')}` : ''
   totalFinal(pdf, y, `Total facturado: ${fmtMoneda(totalUSD, 'USD')}${bs}`)
   pies(pdf)
-  pdf.save(`respaldo-${modo.toLowerCase()}-${iso(ini)}_${iso(fin)}.pdf`)
+  await saveBlob(pdf.output('blob'), `respaldo-${modo.toLowerCase()}-${iso(ini)}_${iso(fin)}.pdf`)
 }
 
 /** Ticket de venta en formato de recibo (80 mm) para el cliente. */
@@ -248,7 +332,7 @@ export async function pdfTicket(venta: Venta, cajero: string) {
   y += 20
   pdf.setFontSize(8); pdf.setTextColor(...MUTED)
   pdf.text('Gracias por su compra', cx, y, { align: 'center' })
-  pdf.save(`ticket-${venta.numero_factura}.pdf`)
+  await saveBlob(pdf.output('blob'), `ticket-${venta.numero_factura}.pdf`)
 }
 
 /** Une las facturas (imágenes) del período en un solo PDF, una por página. */
@@ -269,5 +353,52 @@ export async function pdfFacturas(imagenes: { url: string; nombre: string }[], r
     pdf.addImage(img, 'JPEG', x, top, w, h)
   }
   pies(pdf)
-  pdf.save(`facturas-${rango.replace(/\s+/g, '-')}.pdf`)
+  await saveBlob(pdf.output('blob'), `facturas-${rango.replace(/\s+/g, '-')}.pdf`)
+}
+
+export async function pdfAuditoria(registros: RegistroAuditoria[], nombreAdmin: string, filtrosAplicados: string) {
+  const { pdf, logo } = await nuevoPdf()
+  const W = pdf.internal.pageSize.getWidth()
+  const H = pdf.internal.pageSize.getHeight()
+  const fechaGeneracion = new Date()
+  const numero = (valor: number) => String(valor).padStart(2, '0')
+  const periodoFechas = registros.map(r => parseLocal(r.fecha)).sort((a, b) => a.getTime() - b.getTime())
+  const fechaCorta = (fecha: Date, incluirAnio: boolean) =>
+    `${numero(fecha.getDate())}/${numero(fecha.getMonth() + 1)}${incluirAnio ? `/${fecha.getFullYear()}` : ''}`
+  const periodo = periodoFechas.length
+    ? `${fechaCorta(periodoFechas[0], periodoFechas[0].getFullYear() !== periodoFechas[periodoFechas.length - 1].getFullYear())} al ${fechaCorta(periodoFechas[periodoFechas.length - 1], true)}`
+    : 'Sin registros'
+  const usuarios = new Set(registros.map(r => r.id_usuario ?? 'sistema')).size
+  const modulos = new Set(registros.map(r => r.modulo)).size
+  const nombreArchivo = `auditoria_${fechaGeneracion.getFullYear()}${numero(fechaGeneracion.getMonth() + 1)}${numero(fechaGeneracion.getDate())}_${numero(fechaGeneracion.getHours())}${numero(fechaGeneracion.getMinutes())}.pdf`
+  const generado = fechaGeneracion.toLocaleString('es-VE', { dateStyle: 'short', timeStyle: 'medium' })
+  let y = cabecera(pdf, logo, 'Reporte de Auditoría',
+    `Generado el ${generado} por ${nombreAdmin} (Administrador) · Documento de solo lectura`)
+  y = tarjetas(pdf, y, [
+    ['REGISTROS', String(registros.length), [79, 70, 229]],
+    ['PERÍODO', periodo, [6, 182, 212]],
+    ['USUARIOS', String(usuarios), [16, 185, 129]],
+    ['MÓDULOS', String(modulos), GOLD],
+  ])
+  pdf.setFont('helvetica', 'normal')
+  pdf.setFontSize(8)
+  pdf.setTextColor(...MUTED)
+  const lineasFiltros = pdf.splitTextToSize(`Filtros aplicados: ${filtrosAplicados}`, W - 80)
+  pdf.text(lineasFiltros, 40, y + 2)
+  y += lineasFiltros.length * 10 + 8
+  tablaAuditoria(pdf, y, registros)
+
+  const paginas = pdf.getNumberOfPages()
+  for (let pagina = 1; pagina <= paginas; pagina++) {
+    pdf.setPage(pagina)
+    pdf.setDrawColor(...GOLD)
+    pdf.setLineWidth(1)
+    pdf.line(40, H - 38, W - 40, H - 38)
+    pdf.setTextColor(...MUTED)
+    pdf.setFont('helvetica', 'normal')
+    pdf.setFontSize(7.5)
+    pdf.text(`Bitácora de auditoría · Documento de solo lectura · ${nombreArchivo}`, 40, H - 24)
+    pdf.text(`Página ${pagina} de ${paginas}`, W - 40, H - 24, { align: 'right' })
+  }
+  await saveBlob(pdf.output('blob'), nombreArchivo)
 }

@@ -1,7 +1,7 @@
 /** Tipos espejo de app/schemas/*. Los Decimal de Python llegan como string ("12.50"). */
 
 export type Money = string
-export type Rol = 'admin' | 'cashier'
+export type Rol = 'admin' | 'gestor' | 'cashier'
 
 export interface Token {
   access_token: string
@@ -21,6 +21,8 @@ export interface Usuario {
   permisos: string | null
   estado: number
   fecha_creacion: string | null
+  is_deleted: boolean
+  fecha_eliminacion: string | null
 }
 
 export interface UsuarioCreate {
@@ -59,6 +61,7 @@ export interface Proveedor {
   contacto: string | null
   correo: string | null
   ciudad: string | null
+  direccion: string | null
   condiciones: string | null
   estado: number
 }
@@ -88,6 +91,8 @@ export interface ProductoAdmin extends Producto {
   margen_pct: Money | null
   margen_efectivo: Money | null
   fecha_ingreso: string | null
+  is_deleted: boolean
+  fecha_eliminacion: string | null
 }
 
 export interface ProductoInput {
@@ -254,6 +259,29 @@ export interface CompraCreate {
   detalles: { id_producto: number; cantidad: number; costo_unitario_usd: string }[]
 }
 
+export interface AjusteStockInput {
+  tipo: 'sumar' | 'restar' | 'conteo'
+  cantidad: number
+  motivo: 'conteo' | 'merma' | 'devolucion' | 'otro'
+  observacion: string
+}
+
+export interface AjusteStock {
+  id_ajuste: number
+  id_producto: number
+  sku: string
+  nombre_producto: string
+  cantidad: number
+  stock_anterior: number
+  stock_nuevo: number
+  motivo: string
+  motivo_etiqueta: string
+  observacion: string
+  id_usuario: number
+  nombre_usuario: string
+  fecha: string
+}
+
 export interface EntradaStock {
   id_compra: number
   fecha: string
@@ -261,6 +289,74 @@ export interface EntradaStock {
   nombre_producto: string
   cantidad: number
   nombre_proveedor: string
+}
+
+export interface ResumenGestor {
+  dia: string
+  ventas_hoy: number
+  articulos_hoy: number
+  monto_hoy_usd: Money
+  compras_hoy: number
+  unidades_entrada_hoy: number
+  ajustes_hoy: number
+  productos_bajo_stock: number
+  productos_agotados: number
+  stock_critico: Pick<Producto, 'id_producto' | 'sku' | 'nombre' | 'stock_actual' | 'stock_minimo' | 'estado'>[]
+  cuentas_por_pagar_cantidad: number
+  cuentas_por_pagar_usd: Money
+}
+
+export interface MovimientoInventario {
+  fecha: string
+  tipo: 'entrada' | 'salida' | 'devolucion' | 'ajuste'
+  id_producto: number
+  sku: string
+  producto: string
+  cantidad: number
+  referencia: string
+  usuario: string | null
+  detalle: string | null
+}
+
+export interface Kardex {
+  desde: string
+  hasta: string
+  entradas: number
+  salidas: number
+  devoluciones: number
+  ajustes: number
+  movimientos: MovimientoInventario[]
+  truncado: boolean
+}
+
+export interface ReporteVentas extends ResumenVentas {
+  ventas_anuladas: number
+  por_usuario: { id_usuario: number; nombre_completo: string; cantidad_ventas: number; monto_total_usd: Money }[]
+}
+
+export interface CompraPendiente {
+  id_compra: number
+  numero_factura: string | null
+  fecha: string
+  monto_usd: Money
+  dias: number
+}
+
+export interface CuentaPorPagar {
+  id_proveedor: number
+  proveedor: string
+  rif: string | null
+  telefono: string | null
+  compras: number
+  monto_usd: Money
+  mas_antigua: string
+  detalle: CompraPendiente[]
+}
+
+export interface CuentasPorPagar {
+  total_usd: Money
+  compras: number
+  proveedores: CuentaPorPagar[]
 }
 
 export interface Factura {
@@ -271,6 +367,8 @@ export interface Factura {
   id_compra: number | null
   id_usuario: number
   fecha_subida: string | null
+  is_deleted: boolean
+  fecha_eliminacion: string | null
 }
 
 /* ---------------- Importación masiva de inventario (POST /productos/importar) ---------------- */
@@ -361,6 +459,7 @@ export interface RegistroAuditoria {
 }
 
 export interface PaginaAuditoria { total: number; pagina: number; por_pagina: number; items: RegistroAuditoria[] }
+export interface ExportacionAuditoria { total: number; items: RegistroAuditoria[] }
 
 export interface FiltrosAuditoriaOpciones {
   modulos: { clave: string; etiqueta: string }[]

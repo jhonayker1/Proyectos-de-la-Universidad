@@ -34,7 +34,7 @@ export default function MisVentas() {
           </button>
         </div>
         <div className="card overflow-hidden !rounded-[14px]">
-          <div className="grid grid-cols-3 gap-3 border-b border-border p-4">
+          <div className="grid grid-cols-1 gap-3 border-b border-border p-4 min-[480px]:grid-cols-3">
             <StatBox label="Ventas completadas" value={t.ventas} color="#10b981" />
             <StatBox label="Artículos vendidos" value={t.articulos} color="#4f46e5" />
             <StatBox label="Total facturado" value={usd(t.usd)} color="#06b6d4" />

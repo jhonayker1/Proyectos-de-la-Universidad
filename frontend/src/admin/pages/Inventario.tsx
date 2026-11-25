@@ -1,6 +1,6 @@
 import React from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { FileSpreadsheet, Pencil, Plus, Trash2 } from 'lucide-react'
+import { AlertTriangle, FileSpreadsheet, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react'
 import ImportarInventario from '@/admin/components/ImportarInventario'
 import { productosApi } from '@/api/endpoints'
 import { keys, useApiMutation, useCategorias, useMarcas, useProductosAdmin, useProveedores } from '@/api/queries'
@@ -13,6 +13,21 @@ type Form = {
   sku: string; nombre: string; id_categoria: string; id_marca: string; id_proveedor: string
   stock_actual: string; stock_minimo: string; ubicacion: string
   precio_distribuidor: string; margen: string; precio_manual: string
+}
+
+function ProductoConStock({ producto, onClose }: { producto: ProductoAdmin; onClose: () => void }) {
+  return (
+    <Modal title="No se puede eliminar este producto" onClose={onClose}
+      footer={<button className="btn-primary" onClick={onClose}>Entendido</button>}>
+      <div className="flex gap-3 rounded-xl border border-warning/40 bg-warning/10 p-3.5 text-[13px]">
+        <AlertTriangle size={20} className="mt-0.5 shrink-0 text-warning" />
+        <div>
+          <b>{producto.nombre}</b> ({producto.sku}) todavía tiene <b>{producto.stock_actual} unidad(es) en stock</b>.
+          Venda ese stock o registre un ajuste hasta dejarlo en cero antes de eliminar el producto.
+        </div>
+      </div>
+    </Modal>
+  )
 }
 
 function ProductoModal({ producto, onClose }: { producto: ProductoAdmin | null; onClose: () => void }) {
@@ -91,7 +106,7 @@ function ProductoModal({ producto, onClose }: { producto: ProductoAdmin | null; 
         {guardar.isPending ? 'Guardando...' : 'Guardar'}
       </button>
     </>}>
-      <div className="grid grid-cols-2 gap-3.5">
+      <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
         <Field label="Categoría">
           <select className="input" value={idCategoria} onChange={set('id_categoria')} autoFocus={!producto}>
             {!producto && <option value="" disabled>Seleccione una categoría…</option>}
@@ -104,7 +119,7 @@ function ProductoModal({ producto, onClose }: { producto: ProductoAdmin | null; 
           <input className="input cursor-not-allowed font-mono font-semibold !text-primary" value={skuMostrado} readOnly
             aria-readonly="true" placeholder="—" tabIndex={-1} />
         </Field>
-        <Field label="Nombre" className="col-span-2"><input className="input" value={form.nombre} onChange={set('nombre')} /></Field>
+        <Field label="Nombre" className="col-span-full"><input className="input" value={form.nombre} onChange={set('nombre')} /></Field>
         <Field label="Marca">
           <select className="input" value={form.id_marca} onChange={set('id_marca')}>
             <option value="">Sin marca</option>
@@ -122,7 +137,7 @@ function ProductoModal({ producto, onClose }: { producto: ProductoAdmin | null; 
         <Field label="Precio distribuidor USD"><input className="input" inputMode="decimal" value={form.precio_distribuidor} onChange={set('precio_distribuidor')} placeholder="0.00" /></Field>
         <Field label="Ubicación"><input className="input" value={form.ubicacion} onChange={set('ubicacion')} placeholder="Estante A" /></Field>
 
-        <div className="col-span-2 rounded-xl border border-border bg-muted p-3">
+        <div className="col-span-full rounded-xl border border-border bg-muted p-3">
           <span className="label mb-1.5">Porcentaje de ganancia (%)</span>
           <div className="flex flex-wrap items-center gap-2.5">
             <input aria-label="Porcentaje de ganancia" className="input !w-24 !bg-card" inputMode="decimal" value={form.margen} placeholder={String(margenCat)} onChange={set('margen')} />
@@ -148,7 +163,7 @@ function ProductoModal({ producto, onClose }: { producto: ProductoAdmin | null; 
                 : `Déjalo vacío para usar el porcentaje de la categoría (${margenCat}%).`}
           </div>
         </div>
-        {guardar.error && <div className="col-span-2"><ErrorBanner error={guardar.error} /></div>}
+        {guardar.error && <div className="col-span-full"><ErrorBanner error={guardar.error} /></div>}
       </div>
     </Modal>
   )
@@ -156,22 +171,29 @@ function ProductoModal({ producto, onClose }: { producto: ProductoAdmin | null; 
 
 export default function Inventario() {
   const toast = useToast()
-  const productos = useProductosAdmin()
+  const [incluirEliminados, setIncluirEliminados] = React.useState(false)
+  const productos = useProductosAdmin(incluirEliminados)
   const { convertir } = useTasas()
   const [moneda, setMoneda] = React.useState<MonedaVista>('USD')
   const f = useFiltrosProductos(productos.data)
   const [modal, setModal] = React.useState<{ producto: ProductoAdmin | null } | null>(null)
   const [eliminar, setEliminar] = React.useState<ProductoAdmin | null>(null)
+  const [conStock, setConStock] = React.useState<ProductoAdmin | null>(null)
   const [importar, setImportar] = React.useState(false)
   const eliminacion = useApiMutation((p: ProductoAdmin) => productosApi.remove(p.id_producto),
     [keys.productos, keys.reportes, keys.categorias], () => {
-      toast(`${eliminar?.nombre ?? 'Producto'} eliminado del inventario.`); setEliminar(null)
+      toast(`${eliminar?.nombre ?? 'Producto'} archivado.`); setEliminar(null)
     })
+  const restauracion = useApiMutation((p: ProductoAdmin) => productosApi.restore(p.id_producto),
+    [keys.productos, keys.reportes, keys.categorias], p => toast(`${p.nombre} restaurado.`))
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
       <FiltrosBar filtros={f.filtros} setFiltros={f.setFiltros} limpiar={f.limpiar}>
         <button className="btn-muted" onClick={() => setImportar(true)}><FileSpreadsheet size={14} /> Importar Excel</button>
+        <button className="btn-muted" onClick={() => setIncluirEliminados(value => !value)}>
+          {incluirEliminados ? 'Ocultar archivados' : 'Ver archivados'}
+        </button>
         <button className="btn-primary" onClick={() => setModal({ producto: null })}><Plus size={14} /> Nuevo producto</button>
       </FiltrosBar>
 
@@ -207,11 +229,23 @@ export default function Inventario() {
                     <td className="td whitespace-nowrap text-muted-foreground" title={p.margen_pct === null ? 'Margen de la categoría' : 'Margen propio'}>
                       {num(p.margen_efectivo) === 0 ? 'Manual' : `${num(p.margen_efectivo)}%`}{p.margen_pct !== null && ' *'}
                     </td>
-                    <td className="td"><Badge>{p.estado}</Badge></td>
+                    <td className="td"><Badge>{p.is_deleted ? 'Archivado' : p.estado}</Badge></td>
                     <td className="td">
                       <div className="flex gap-1.5">
-                        <button aria-label={`Editar ${p.nombre}`} className="btn-icon !h-[30px] !w-[30px] text-primary" onClick={() => setModal({ producto: p })}><Pencil size={13} /></button>
-                        <button aria-label={`Eliminar ${p.nombre}`} title="Eliminar producto" className="btn-icon !h-[30px] !w-[30px] text-danger" onClick={() => setEliminar(p)}><Trash2 size={13} /></button>
+                        {p.is_deleted ? (
+                          <button aria-label={`Restaurar ${p.nombre}`} title="Restaurar producto" className="btn-icon !h-[30px] !w-[30px] text-success"
+                            disabled={restauracion.isPending} onClick={() => restauracion.mutate(p, { onError: e => toast(errorText(e), 'error') })}>
+                            <RotateCcw size={13} />
+                          </button>
+                        ) : (
+                          <>
+                            <button aria-label={`Editar ${p.nombre}`} className="btn-icon !h-[30px] !w-[30px] text-primary" onClick={() => setModal({ producto: p })}><Pencil size={13} /></button>
+                            <button aria-label={`Eliminar ${p.nombre}`}
+                              title="Archivar producto"
+                              className="btn-icon !h-[30px] !w-[30px] text-danger"
+                              onClick={() => p.stock_actual > 0 ? setConStock(p) : setEliminar(p)}><Trash2 size={13} /></button>
+                          </>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -229,15 +263,13 @@ export default function Inventario() {
 
       {modal && <ProductoModal producto={modal.producto} onClose={() => setModal(null)} />}
       {importar && <ImportarInventario onClose={() => setImportar(false)} />}
+      {conStock && <ProductoConStock producto={conStock} onClose={() => setConStock(null)} />}
       {eliminar && (
         <ConfirmDialog danger title="Eliminar producto" confirmText="Eliminar" busy={eliminacion.isPending}
           message={<>
-            ¿Eliminar <b>{eliminar.nombre}</b> ({eliminar.sku}) del inventario? Desaparecerá de la lista y ya no se podrá vender.
-            Esta acción no se puede deshacer.
+            ¿Archivar <b>{eliminar.nombre}</b> ({eliminar.sku})? Desaparecerá del inventario operativo y no se podrá vender.
+            Podrá restaurarse después; el registro, el SKU y el stock se conservarán.
             <div className="mt-2 text-xs">Las ventas y compras ya registradas de este producto se conservan en los reportes.</div>
-            {eliminar.stock_actual > 0 && (
-              <div className="mt-2 font-semibold text-warning">Atención: todavía tiene {eliminar.stock_actual} unidad(es) en stock.</div>
-            )}
             {eliminacion.error && <div className="mt-3"><ErrorBanner error={eliminacion.error} /></div>}
           </>}
           onConfirm={() => eliminacion.mutate(eliminar)} onClose={() => { setEliminar(null); eliminacion.reset() }} />

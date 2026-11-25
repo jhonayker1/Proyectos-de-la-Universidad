@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, SmallInteger, String
+from sqlalchemy import Boolean, CheckConstraint, Column, DateTime, ForeignKey, Integer, SmallInteger, String
 from sqlalchemy.orm import relationship
 
 from app.core.dates import local_now
@@ -10,11 +10,14 @@ ROLE_ALIASES = {
     "administrador": "admin",
     "cashier": "cashier",
     "cajero": "cashier",
+    "gestor": "gestor",
+    "asistente administrativo": "gestor",
+    "secretario": "gestor",
 }
 
 
 def role_key(role_name: str | None) -> str | None:
-    """Traduce roles.nombre ('Administrador', 'Cajero', ...) a 'admin' o 'cashier'."""
+    """Traduce los nombres de roles de la base a sus claves internas."""
     if not role_name:
         return None
     return ROLE_ALIASES.get(role_name.strip().lower())
@@ -41,6 +44,17 @@ class Usuario(Base):
     estado = Column(SmallInteger, nullable=False, default=1, server_default="1")
     fecha_creacion = Column(DateTime, nullable=True, default=local_now)
     permisos = Column(String(255), nullable=True)
+    is_deleted = Column(Boolean, nullable=False, default=False, server_default="false")
+    fecha_eliminacion = Column(DateTime, nullable=True)
+    id_usuario_eliminacion = Column(Integer, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "(is_deleted AND fecha_eliminacion IS NOT NULL) OR "
+            "(NOT is_deleted AND fecha_eliminacion IS NULL)",
+            name="ck_usuarios_soft_delete",
+        ),
+    )
 
     rol_rel = relationship("Rol", lazy="joined")
 
@@ -50,4 +64,4 @@ class Usuario(Base):
 
     @property
     def is_active(self) -> bool:
-        return self.estado == 1
+        return self.estado == 1 and not self.is_deleted

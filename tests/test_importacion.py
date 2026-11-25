@@ -205,6 +205,29 @@ def test_politicas_para_sku_existente(client, db_session, admin):
     assert productos(db_session)["LUB-27"].stock_actual == 10
 
 
+def test_import_can_reuse_sku_from_archived_product(client, db_session, admin):
+    existente = db_session.query(Producto).filter_by(sku="LUB-27").one()
+    existente.stock_actual = 0
+    db_session.commit()
+    assert client.delete(
+        f"/productos/{existente.id_producto}", headers=admin
+    ).status_code == 204
+    contenido = xlsx([
+        ["SKU", "Nombre", "Categoría", "Precio", "Stock"],
+        ["LUB-27", "Aceite nuevo", "Lubricantes", 15, 4],
+    ])
+
+    r = subir(client, admin, contenido, modo="estricto")
+
+    assert r.status_code == 200, r.text
+    assert r.json()["resumen"]["creados"] == 1
+    db_session.expire_all()
+    filas = db_session.query(Producto).filter(Producto.sku == "LUB-27").all()
+    assert len(filas) == 2
+    assert sum(p.is_deleted for p in filas) == 1
+    assert sum(not p.is_deleted for p in filas) == 1
+
+
 def test_duplicados_en_el_archivo_y_contra_la_base(client, db_session, admin):
     contenido = xlsx([
         ["SKU", "Nombre", "Categoría", "Stock"],

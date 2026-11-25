@@ -95,7 +95,10 @@ def dashboard(db: Session = Depends(get_db)) -> Dashboard:
     inicio_mes = hoy.replace(day=1)
     fin_mes_anterior = inicio_mes - timedelta(days=1)
     resumen_hoy = build_summary(db, hoy)
-    productos = db.query(Producto).filter(Producto.estado != PRODUCTO_INACTIVO).all()
+    productos = db.query(Producto).filter(
+        Producto.is_deleted.is_(False),
+        Producto.estado != PRODUCTO_INACTIVO,
+    ).all()
     return Dashboard(
         dia=hoy,
         ventas_hoy_usd=resumen_hoy.monto_total_usd,
@@ -270,7 +273,10 @@ def sales_by_category(
 def stock_by_category(db: Session = Depends(get_db)) -> list[StockCategoria]:
     categorias = {c.id_categoria: c for c in db.query(Categoria).all()}
     stats: dict[int, list] = defaultdict(lambda: [0, 0, Decimal("0"), 0, 0])
-    for p in db.query(Producto).filter(Producto.estado != PRODUCTO_INACTIVO).all():
+    for p in db.query(Producto).filter(
+        Producto.is_deleted.is_(False),
+        Producto.estado != PRODUCTO_INACTIVO,
+    ).all():
         row = stats[p.id_categoria]
         row[0] += 1
         row[1] += p.stock_actual

@@ -31,7 +31,11 @@ def reprice_category(db: Session, categoria: Categoria) -> None:
         return
     productos = (
         db.query(Producto)
-        .filter(Producto.id_categoria == categoria.id_categoria, Producto.margen_pct.is_(None))
+        .filter(
+            Producto.id_categoria == categoria.id_categoria,
+            Producto.margen_pct.is_(None),
+            Producto.is_deleted.is_(False),
+        )
         .all()
     )
     for producto in productos:

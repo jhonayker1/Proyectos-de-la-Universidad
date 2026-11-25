@@ -9,7 +9,7 @@ from app.schemas.usuarios import UsuarioCreate
 
 
 def find_role(db: Session, key: str) -> Rol:
-    """Busca en la tabla roles el registro que corresponde a 'admin' o 'cashier'."""
+    """Busca en la tabla roles el registro activo correspondiente a la clave interna."""
     for rol in db.query(Rol).filter(Rol.estado == 1).order_by(Rol.id_rol).all():
         if role_key(rol.nombre) == key:
             return rol
@@ -22,7 +22,10 @@ def find_role(db: Session, key: str) -> Rol:
 def find_user_by_email(db: Session, correo: str) -> Usuario | None:
     return (
         db.query(Usuario)
-        .filter(func.lower(Usuario.correo) == correo.strip().lower())
+        .filter(
+            func.lower(Usuario.correo) == correo.strip().lower(),
+            Usuario.is_deleted.is_(False),
+        )
         .first()
     )
 

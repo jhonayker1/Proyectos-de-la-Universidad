@@ -1,4 +1,15 @@
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, Numeric, SmallInteger, String
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Column,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    Numeric,
+    SmallInteger,
+    String,
+)
 from sqlalchemy.orm import relationship
 
 from app.core.dates import local_now
@@ -8,6 +19,12 @@ PRODUCTO_DISPONIBLE = "Disponible"
 PRODUCTO_BAJO_STOCK = "Bajo Stock"
 PRODUCTO_AGOTADO = "Agotado"
 PRODUCTO_INACTIVO = "Inactivo"
+MOTIVOS_AJUSTE = {
+    "conteo": "Conteo físico",
+    "merma": "Daño o merma",
+    "devolucion": "Devolución",
+    "otro": "Otro",
+}
 
 
 class Categoria(Base):
@@ -43,6 +60,7 @@ class Proveedor(Base):
     contacto = Column(String(100), nullable=True)
     correo = Column(String(100), nullable=True)
     ciudad = Column(String(60), nullable=True)
+    direccion = Column(String(200), nullable=True)
     condiciones = Column(String(120), nullable=True)
 
 
@@ -52,7 +70,7 @@ class Producto(Base):
     __tablename__ = "productos"
 
     id_producto = Column(Integer, primary_key=True)
-    sku = Column(String(50), nullable=False, unique=True)
+    sku = Column(String(50), nullable=False)
     nombre = Column(String(150), nullable=False)
     id_marca = Column(Integer, ForeignKey("marcas.id_marca"), nullable=True)
     id_categoria = Column(Integer, ForeignKey("categorias.id_categoria"), nullable=False)
@@ -66,20 +84,38 @@ class Producto(Base):
     # Margen propio (%); si es NULL se usa el de la categoría (migración 002).
     margen_pct = Column(Numeric(5, 2), nullable=True)
     ubicacion = Column(String(80), nullable=True)
+    is_deleted = Column(Boolean, nullable=False, default=False, server_default="false")
+    fecha_eliminacion = Column(DateTime, nullable=True)
+    id_usuario_eliminacion = Column(Integer, nullable=True)
 
     marca = relationship("Marca", lazy="joined")
     categoria = relationship("Categoria", lazy="joined")
     proveedor = relationship("Proveedor", lazy="joined")
 
+    __table_args__ = (
+        Index(
+            "ux_productos_sku_activo",
+            "sku",
+            unique=True,
+            postgresql_where=is_deleted.is_(False),
+            sqlite_where=is_deleted.is_(False),
+        ),
+        CheckConstraint(
+            "(is_deleted AND fecha_eliminacion IS NOT NULL) OR "
+            "(NOT is_deleted AND fecha_eliminacion IS NULL)",
+            name="ck_productos_soft_delete",
+        ),
+    )
+
     @property
     def is_active(self) -> bool:
-        return self.estado != PRODUCTO_INACTIVO
+        return not self.is_deleted and self.estado != PRODUCTO_INACTIVO
 
     def sync_stock_status(self) -> None:
         """Ajusta estado según el stock, con la misma regla de los datos de la base:
         Agotado si no hay stock, Bajo Stock si está por debajo del mínimo y Disponible
         en otro caso. No toca productos dados de baja (Inactivo)."""
-        if self.estado == PRODUCTO_INACTIVO:
+        if self.is_deleted or self.estado == PRODUCTO_INACTIVO:
             return
         if self.stock_actual <= 0:
             self.estado = PRODUCTO_AGOTADO
@@ -87,3 +123,22 @@ class Producto(Base):
             self.estado = PRODUCTO_BAJO_STOCK
         else:
             self.estado = PRODUCTO_DISPONIBLE
+
+
+class AjusteStock(Base):
+    """Corrección manual de stock con su justificación."""
+
+    __tablename__ = "ajustes_stock"
+
+    id_ajuste = Column(Integer, primary_key=True)
+    id_producto = Column(Integer, ForeignKey("productos.id_producto"), nullable=False)
+    cantidad = Column(Integer, nullable=False)
+    stock_anterior = Column(Integer, nullable=False)
+    stock_nuevo = Column(Integer, nullable=False)
+    motivo = Column(String(30), nullable=False)
+    observacion = Column(String(255), nullable=False)
+    id_usuario = Column(Integer, ForeignKey("usuarios.id_usuario"), nullable=False)
+    fecha = Column(DateTime, nullable=False, default=local_now)
+
+    producto = relationship("Producto", lazy="joined")
+    usuario = relationship("Usuario", lazy="joined")

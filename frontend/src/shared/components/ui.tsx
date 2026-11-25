@@ -66,7 +66,7 @@ export function Modal({ title, subtitle, onClose, children, footer, width = 'max
   }, [onClose])
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/45 p-4" onMouseDown={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div role="dialog" aria-modal="true" aria-label={title} className={cx('max-h-[92vh] w-full overflow-y-auto rounded-2xl border border-border bg-card p-7 shadow-2xl', width)}>
+      <div role="dialog" aria-modal="true" aria-label={title} className={cx('max-h-[92vh] w-full overflow-y-auto rounded-2xl border border-border bg-card p-4 shadow-2xl sm:p-7', width)}>
         <div className="mb-5 flex items-start justify-between gap-4">
           <div>
             <h3 className="m-0 text-[17px] font-bold">{title}</h3>
@@ -75,7 +75,7 @@ export function Modal({ title, subtitle, onClose, children, footer, width = 'max
           <button aria-label="Cerrar" className="btn-icon border-none" onClick={onClose}><X size={16} /></button>
         </div>
         {children}
-        {footer && <div className="mt-5 flex justify-end gap-2.5">{footer}</div>}
+        {footer && <div className="mt-5 flex flex-wrap justify-end gap-2.5">{footer}</div>}
       </div>
     </div>
   )
@@ -214,7 +214,7 @@ export function Pagination({ page, total, onChange }: { page: number; total: num
   if (total <= 1) return null
   const pages = Array.from({ length: total }, (_, i) => i + 1).filter(n => n === 1 || n === total || Math.abs(n - page) <= 1)
   return (
-    <div className="flex items-center gap-1.5">
+    <div className="flex flex-wrap items-center gap-1.5">
       <span className="mr-1 text-[13px] text-muted-foreground">Páginas:</span>
       <button className="btn-muted !px-3 !py-1" disabled={page === 1} onClick={() => onChange(page - 1)}>Anterior</button>
       {pages.map((n, i) => (

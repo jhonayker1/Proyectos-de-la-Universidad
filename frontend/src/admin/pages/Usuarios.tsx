@@ -1,6 +1,6 @@
 import React from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Download, KeyRound, Pencil, Plus, PowerOff, Trash2 } from 'lucide-react'
+import { Download, KeyRound, Pencil, Plus, PowerOff, RotateCcw, Trash2 } from 'lucide-react'
 import { ApiError } from '@/api/client'
 import { categoriasApi, finanzasApi, usuariosApi, ventasApi } from '@/api/endpoints'
 import { keys, useApiMutation, useCategorias } from '@/api/queries'
@@ -147,13 +147,21 @@ function VentasHoy() {
   )
 }
 
-type FormUsuario = { nombre_completo: string; correo: string; password: string; telefono: string; permisos: string }
+type FormUsuario = {
+  nombre_completo: string
+  correo: string
+  password: string
+  telefono: string
+  permisos: string
+  rol: 'cashier' | 'gestor'
+}
 
 function UsuarioModal({ editar, onClose }: { editar: Usuario | null; onClose: () => void }) {
   const toast = useToast()
   const [form, setForm] = React.useState<FormUsuario>({
     nombre_completo: editar?.nombre_completo ?? '', correo: editar?.correo ?? '', password: '',
     telefono: editar?.telefono ?? '', permisos: editar?.permisos ?? '',
+    rol: editar?.rol === 'gestor' ? 'gestor' : 'cashier',
   })
   const set = (k: keyof FormUsuario) => (e: React.ChangeEvent<HTMLInputElement>) => setForm(f => ({ ...f, [k]: e.target.value }))
   const guardar = useApiMutation(async () => {
@@ -161,11 +169,14 @@ function UsuarioModal({ editar, onClose }: { editar: Usuario | null; onClose: ()
       nombre_completo: form.nombre_completo.trim(), correo: form.correo.trim(),
       telefono: form.telefono.trim() || null, permisos: form.permisos.trim() || null,
     }
-    return editar ? usuariosApi.update(editar.id_usuario, base) : usuariosApi.create({ ...base, password: form.password, rol: 'cashier' })
-  }, [keys.usuarios], () => { toast(editar ? 'Usuario actualizado.' : 'Cajero creado.'); onClose() })
+    return editar ? usuariosApi.update(editar.id_usuario, base) : usuariosApi.create({ ...base, password: form.password, rol: form.rol })
+  }, [keys.usuarios], () => {
+    toast(editar ? 'Usuario actualizado.' : `${form.rol === 'gestor' ? 'Gestor' : 'Cajero'} creado.`)
+    onClose()
+  })
   const invalido = form.nombre_completo.trim().length < 3 || !form.correo.includes('@') || (!editar && form.password.length < 8)
   return (
-    <Modal title={editar ? 'Editar usuario' : 'Nuevo cajero'} onClose={onClose} footer={<>
+    <Modal title={editar ? 'Editar usuario' : 'Nuevo usuario'} onClose={onClose} footer={<>
       <button className="btn-muted" onClick={onClose}>Cancelar</button>
       <button className="btn-primary" disabled={invalido || guardar.isPending} onClick={() => guardar.mutate(undefined)}>
         {guardar.isPending ? 'Guardando...' : 'Guardar'}
@@ -182,11 +193,11 @@ function UsuarioModal({ editar, onClose }: { editar: Usuario | null; onClose: ()
         )}
         <Field label="Teléfono"><input className="input" value={form.telefono} onChange={set('telefono')} /></Field>
         <Field label="Permisos (descripción)"><input className="input" placeholder="Ventas, apertura de caja..." value={form.permisos} onChange={set('permisos')} /></Field>
-        {/* Solo se crean cajeros (plans/limitar-creacion-usuarios-a-cajeros.md). */}
         <Field label="Rol">
-          <select className="input" disabled value={editar?.rol ?? 'cashier'}>
+            <select className="input" disabled={Boolean(editar)} value={editar?.rol ?? form.rol}
+              onChange={e => setForm(f => ({ ...f, rol: e.target.value as FormUsuario['rol'] }))}>
             <option value="cashier">Cajero</option>
-            <option value="admin">Administrador</option>
+              <option value="gestor">Gestor</option>
           </select>
         </Field>
         {guardar.error && <ErrorBanner error={guardar.error} />}
@@ -223,17 +234,20 @@ function PasswordModal({ usuario, onClose }: { usuario: Usuario; onClose: () => 
   )
 }
 
-function UserCard({ u, esYo, onEdit, onReset, onToggle, onDelete }: {
-  u: Usuario; esYo: boolean; onEdit: () => void; onReset: () => void; onToggle: () => void; onDelete: () => void
+function UserCard({ u, esYo, onEdit, onReset, onToggle, onDelete, onRestore, restaurando }: {
+  u: Usuario; esYo: boolean; onEdit: () => void; onReset: () => void; onToggle: () => void
+  onDelete: () => void; onRestore: () => void; restaurando: boolean
 }) {
   const activo = u.estado === 1
-  const rol = u.rol === 'admin' ? 'Administrador' : 'Cajero'
+  const rol = u.rol === 'admin' ? 'Administrador' : u.rol === 'gestor' ? 'Gestor' : 'Cajero'
   const color = colorDe(u.id_usuario)
   return (
     <div className="card flex flex-col gap-3.5 p-5">
       <div className="flex items-center justify-between">
         <span className="font-display text-sm font-bold">{rol}{esYo && ' · Tú'}</span>
-        <Badge tone={activo ? 'Activo' : 'Inactivo'}>{activo ? 'Activo' : 'Inactivo'}</Badge>
+        <Badge tone={u.is_deleted ? 'Inactivo' : activo ? 'Activo' : 'Inactivo'}>
+          {u.is_deleted ? 'Archivado' : activo ? 'Activo' : 'Inactivo'}
+        </Badge>
       </div>
       <div className="flex items-center gap-3">
         <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full font-display text-xl font-extrabold text-white" style={{ background: color }}>
@@ -246,18 +260,23 @@ function UserCard({ u, esYo, onEdit, onReset, onToggle, onDelete }: {
         </div>
       </div>
       <div className="flex flex-wrap gap-2">
-        <button className="btn-primary !px-3.5 !py-1.5 text-xs" onClick={onEdit}><Pencil size={12} /> Editar</button>
-        <button className="btn-muted !px-3.5 !py-1.5 text-xs" onClick={onReset}><KeyRound size={12} /> Restablecer contraseña</button>
-        {!esYo && (
+        {!u.is_deleted && <>
+          <button className="btn-primary !px-3.5 !py-1.5 text-xs" onClick={onEdit}><Pencil size={12} /> Editar</button>
+          <button className="btn-muted !px-3.5 !py-1.5 text-xs" onClick={onReset}><KeyRound size={12} /> Restablecer contraseña</button>
+        </>}
+        {!u.is_deleted && !esYo && (
           <button className={`${activo ? 'btn-danger' : 'btn-success'} !px-3.5 !py-1.5 text-xs`} onClick={onToggle}>
             <PowerOff size={12} /> {activo ? 'Desactivar' : 'Activar'}
           </button>
         )}
-        {!esYo && (
+        {!u.is_deleted && !esYo && (
           <button className="btn ml-auto border border-danger/25 bg-danger/10 !px-3.5 !py-1.5 text-xs text-danger" onClick={onDelete}>
             <Trash2 size={12} /> Eliminar
           </button>
         )}
+        {u.is_deleted && <button className="btn-success !px-3.5 !py-1.5 text-xs" disabled={restaurando} onClick={onRestore}>
+          <RotateCcw size={12} /> Restaurar
+        </button>}
       </div>
     </div>
   )
@@ -266,15 +285,21 @@ function UserCard({ u, esYo, onEdit, onReset, onToggle, onDelete }: {
 export default function Usuarios() {
   const yo = useCurrentUser()
   const toast = useToast()
-  const usuarios = useQuery({ queryKey: keys.usuarios, queryFn: usuariosApi.list })
+  const [incluirEliminados, setIncluirEliminados] = React.useState(false)
+  const usuarios = useQuery({
+    queryKey: [...keys.usuarios, incluirEliminados],
+    queryFn: () => usuariosApi.list({ incluir_eliminados: incluirEliminados }),
+  })
   const [modal, setModal] = React.useState<{ editar: Usuario | null } | null>(null)
   const [reset, setReset] = React.useState<Usuario | null>(null)
   const [borrar, setBorrar] = React.useState<Usuario | null>(null)
   const toggle = useApiMutation((u: Usuario) => usuariosApi.setActivo(u.id_usuario, u.estado !== 1), [keys.usuarios],
     u => toast(`${u.nombre_completo} ${u.estado === 1 ? 'activado' : 'desactivado'}.`))
   const eliminar = useApiMutation((u: Usuario) => usuariosApi.remove(u.id_usuario), [keys.usuarios], () => {
-    toast('Usuario eliminado.'); setBorrar(null)
+    toast('Usuario archivado.'); setBorrar(null)
   })
+  const restaurar = useApiMutation((u: Usuario) => usuariosApi.restore(u.id_usuario), [keys.usuarios],
+    u => toast(`${u.nombre_completo} restaurado.`))
 
   return (
     <div className="flex flex-col gap-4">
@@ -283,7 +308,7 @@ export default function Usuarios() {
         <TasaCard codigo="COP" titulo="Pesos por Dólar" />
         <MargenCard />
         <button className="btn-primary ml-auto !px-[18px] !py-2.5 shadow-md" onClick={() => setModal({ editar: null })}>
-          <Plus size={15} /> Nuevo Cajero
+          <Plus size={15} /> Nuevo usuario
         </button>
       </div>
 
@@ -293,6 +318,9 @@ export default function Usuarios() {
           <div className="shrink-0 border-b border-border px-[18px] py-3.5">
             <h3 className="m-0 text-sm font-bold">Usuarios</h3>
             <p className="mt-0.5 mb-0 text-[11px] text-muted-foreground">{usuarios.data?.length ?? 0} miembros registrados</p>
+            <button className="btn-muted mt-2 !px-3 !py-1 text-xs" onClick={() => setIncluirEliminados(value => !value)}>
+              {incluirEliminados ? 'Ocultar archivados' : 'Ver archivados'}
+            </button>
           </div>
           <div className="flex max-h-[640px] flex-col gap-2.5 overflow-y-auto p-3">
             {usuarios.isLoading ? <Spinner /> : usuarios.error ? <ErrorBanner error={usuarios.error} onRetry={() => usuarios.refetch()} /> :
@@ -300,7 +328,9 @@ export default function Usuarios() {
                 <UserCard key={u.id_usuario} u={u} esYo={u.id_usuario === yo.id_usuario}
                   onEdit={() => setModal({ editar: u })} onReset={() => setReset(u)}
                   onToggle={() => toggle.mutate(u, { onError: e => toast(errorText(e), 'error') })}
-                  onDelete={() => setBorrar(u)} />
+                  onDelete={() => setBorrar(u)}
+                  onRestore={() => restaurar.mutate(u, { onError: e => toast(errorText(e), 'error') })}
+                  restaurando={restaurar.isPending} />
               ))}
           </div>
         </div>
@@ -311,7 +341,7 @@ export default function Usuarios() {
       {borrar && (
         <ConfirmDialog danger title="Eliminar usuario" confirmText="Eliminar" busy={eliminar.isPending}
           message={<>
-            ¿Eliminar a <b>{borrar.nombre_completo}</b>? Solo se puede eliminar si no tiene ventas ni compras registradas.
+            ¿Archivar a <b>{borrar.nombre_completo}</b>? No podrá iniciar sesión; su identidad e historial se conservarán.
             {eliminar.error instanceof ApiError && eliminar.error.status === 409 && (
               <div className="mt-3 flex flex-col gap-2">
                 <ErrorBanner error={eliminar.error} />

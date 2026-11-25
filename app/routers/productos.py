@@ -6,20 +6,23 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.core.dependencies import require_roles
+from app.core.dates import local_now
 from app.core.money import to_local
 from app.database.session import get_db
-from app.models.compras import DetalleCompra
 from app.models.inventario import (
     PRODUCTO_DISPONIBLE,
     PRODUCTO_INACTIVO,
+    AjusteStock,
     Categoria,
     Marca,
+    MOTIVOS_AJUSTE,
     Producto,
     Proveedor,
 )
 from app.models.usuarios import Usuario
-from app.models.ventas import DetalleVenta
 from app.schemas.productos import (
+    AjusteStockCreate,
+    AjusteStockRead,
     ProductoAdminRead,
     ProductoCreate,
     ProductoRead,
@@ -45,7 +48,11 @@ def to_read(schema: type[ProductoRead], producto: Producto, rate: Decimal | None
 
 
 def get_or_404(db: Session, id_producto: int) -> Producto:
-    producto = db.query(Producto).filter(Producto.id_producto == id_producto).first()
+    producto = (
+        db.query(Producto)
+        .filter(Producto.id_producto == id_producto, Producto.is_deleted.is_(False))
+        .first()
+    )
     if producto is None:
         raise HTTPException(status_code=404, detail="Producto no encontrado.")
     return producto
@@ -71,15 +78,36 @@ def commit_or_conflict(db: Session) -> None:
         raise HTTPException(status_code=409, detail="El SKU ya está registrado.") from exc
 
 
+def ajuste_read(ajuste) -> AjusteStockRead:
+    return AjusteStockRead(
+        id_ajuste=ajuste.id_ajuste,
+        id_producto=ajuste.id_producto,
+        sku=ajuste.producto.sku,
+        nombre_producto=ajuste.producto.nombre,
+        cantidad=ajuste.cantidad,
+        stock_anterior=ajuste.stock_anterior,
+        stock_nuevo=ajuste.stock_nuevo,
+        motivo=ajuste.motivo,
+        motivo_etiqueta=MOTIVOS_AJUSTE[ajuste.motivo],
+        observacion=ajuste.observacion,
+        id_usuario=ajuste.id_usuario,
+        nombre_usuario=ajuste.usuario.nombre_completo,
+        fecha=ajuste.fecha,
+    )
+
+
 @router.get("/", response_model=list[ProductoRead])
 def list_products(
     buscar: str | None = Query(default=None, max_length=150),
     id_categoria: int | None = None,
     id_marca: int | None = None,
     db: Session = Depends(get_db),
-    _: Usuario = Depends(require_roles(["admin", "cashier"])),
+    _: Usuario = Depends(require_roles(["admin", "gestor", "cashier"])),
 ) -> list[ProductoRead]:
-    query = db.query(Producto).filter(Producto.estado != PRODUCTO_INACTIVO)
+    query = db.query(Producto).filter(
+        Producto.is_deleted.is_(False),
+        Producto.estado != PRODUCTO_INACTIVO,
+    )
     if buscar:
         pattern = f"%{buscar.strip()}%"
         query = query.filter(or_(Producto.nombre.ilike(pattern), Producto.sku.ilike(pattern)))
@@ -95,13 +123,23 @@ def list_products(
 def list_products_admin(
     incluir_eliminados: bool = Query(default=False),
     db: Session = Depends(get_db),
-    _: Usuario = Depends(require_roles(["admin"])),
+    current_user: Usuario = Depends(require_roles(["admin", "gestor"])),
 ) -> list[ProductoRead]:
+    if incluir_eliminados and current_user.rol != "admin":
+        raise HTTPException(status_code=403, detail="Solo el administrador puede ver productos archivados.")
     rate = local_rate_value(db)
     query = db.query(Producto)
     if not incluir_eliminados:
-        query = query.filter(Producto.estado != PRODUCTO_INACTIVO)
-    return [to_read(ProductoAdminRead, p, rate) for p in query.order_by(Producto.nombre).all()]
+        query = query.filter(
+            Producto.is_deleted.is_(False),
+            Producto.estado != PRODUCTO_INACTIVO,
+        )
+    productos = [to_read(ProductoAdminRead, p, rate) for p in query.order_by(Producto.nombre).all()]
+    if current_user.rol == "gestor":
+        for producto in productos:
+            producto.margen_pct = None
+            producto.margen_efectivo = None
+    return productos
 
 
 @router.get("/stock-bajo", response_model=list[ProductoAdminRead])
@@ -113,6 +151,7 @@ def list_low_stock(
     productos = (
         db.query(Producto)
         .filter(
+            Producto.is_deleted.is_(False),
             Producto.estado != PRODUCTO_INACTIVO,
             Producto.stock_actual < Producto.stock_minimo,
         )
@@ -137,16 +176,52 @@ def next_sku(
     return {"sku": sku, "prefijo": categoria.prefijo_sku}
 
 
+@router.get("/ajustes-stock", response_model=list[AjusteStockRead])
+def list_recent_stock_adjustments(
+    limite: int = Query(default=100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    _: Usuario = Depends(require_roles(["admin", "gestor"])),
+) -> list[AjusteStockRead]:
+    ajustes = (
+        db.query(AjusteStock)
+        .order_by(AjusteStock.fecha.desc(), AjusteStock.id_ajuste.desc())
+        .limit(limite)
+        .all()
+    )
+    return [ajuste_read(ajuste) for ajuste in ajustes]
+
+
 @router.get("/{id_producto}", response_model=ProductoRead)
 def get_product(
     id_producto: int,
     db: Session = Depends(get_db),
-    _: Usuario = Depends(require_roles(["admin", "cashier"])),
+    _: Usuario = Depends(require_roles(["admin", "gestor", "cashier"])),
 ) -> ProductoRead:
     producto = get_or_404(db, id_producto)
     if not producto.is_active:
         raise HTTPException(status_code=404, detail="Producto no encontrado.")
     return to_read(ProductoRead, producto, local_rate_value(db))
+
+
+@router.post("/{id_producto}/restaurar", response_model=ProductoAdminRead)
+def restore_product(
+    id_producto: int,
+    db: Session = Depends(get_db),
+    _: Usuario = Depends(require_roles(["admin"])),
+) -> ProductoRead:
+    producto = (
+        db.query(Producto)
+        .filter(Producto.id_producto == id_producto, Producto.is_deleted.is_(True))
+        .first()
+    )
+    if producto is None:
+        raise HTTPException(status_code=404, detail="Producto eliminado no encontrado.")
+    producto.is_deleted = False
+    producto.fecha_eliminacion = None
+    producto.id_usuario_eliminacion = None
+    commit_or_conflict(db)
+    db.refresh(producto)
+    return to_read(ProductoAdminRead, producto, local_rate_value(db))
 
 
 @router.post("/", response_model=ProductoAdminRead, status_code=status.HTTP_201_CREATED)
@@ -211,21 +286,80 @@ def update_product(
 def delete_product(
     id_producto: int,
     db: Session = Depends(get_db),
-    _: Usuario = Depends(require_roles(["admin"])),
+    current_user: Usuario = Depends(require_roles(["admin"])),
 ) -> None:
-    """Elimina el producto. Sin ventas ni compras se borra de la base; con historial se
-    oculta de todas las pantallas (estado Inactivo) para no romper facturas y reportes, y
-    se libera su SKU para poder reutilizarlo."""
+    """Archiva un producto sin stock y conserva sus referencias históricas."""
     producto = get_or_404(db, id_producto)
-    tiene_historial = any(
-        db.query(modelo).filter(modelo.id_producto == id_producto).first() is not None
-        for modelo in (DetalleVenta, DetalleCompra)
-    )
-    if tiene_historial:
-        sufijo = f"~{producto.id_producto}"
-        if producto.estado != PRODUCTO_INACTIVO:
-            producto.sku = producto.sku[: 50 - len(sufijo)] + sufijo
-        producto.estado = PRODUCTO_INACTIVO
-    else:
-        db.delete(producto)
+    if producto.stock_actual > 0:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="No se puede eliminar un producto con stock. Ajuste el stock a cero antes de continuar.",
+        )
+    producto.is_deleted = True
+    producto.fecha_eliminacion = local_now()
+    producto.id_usuario_eliminacion = current_user.id_usuario
     db.commit()
+
+
+@router.post("/{id_producto}/ajustes-stock", response_model=AjusteStockRead,
+             status_code=status.HTTP_201_CREATED)
+def create_stock_adjustment(
+    id_producto: int,
+    ajuste_in: AjusteStockCreate,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(require_roles(["admin", "gestor"])),
+) -> AjusteStockRead:
+    producto = (
+        db.query(Producto)
+        .filter(Producto.id_producto == id_producto, Producto.is_deleted.is_(False))
+        .with_for_update()
+        .first()
+    )
+    if producto is None or not producto.is_active:
+        raise HTTPException(status_code=404, detail="Producto no encontrado.")
+
+    anterior = producto.stock_actual
+    if ajuste_in.tipo == "sumar":
+        nuevo = anterior + ajuste_in.cantidad
+    elif ajuste_in.tipo == "restar":
+        nuevo = anterior - ajuste_in.cantidad
+    else:
+        nuevo = ajuste_in.cantidad
+    if nuevo < 0:
+        raise HTTPException(status_code=422, detail="El ajuste no puede dejar stock negativo.")
+
+    producto.stock_actual = nuevo
+    producto.sync_stock_status()
+    ajuste = AjusteStock(
+        id_producto=producto.id_producto,
+        cantidad=nuevo - anterior,
+        stock_anterior=anterior,
+        stock_nuevo=nuevo,
+        motivo=ajuste_in.motivo,
+        observacion=ajuste_in.observacion,
+        id_usuario=current_user.id_usuario,
+        fecha=local_now(),
+    )
+    db.add(ajuste)
+    db.commit()
+    db.refresh(ajuste)
+    return ajuste_read(ajuste)
+
+
+@router.get("/{id_producto}/ajustes-stock", response_model=list[AjusteStockRead])
+def list_stock_adjustments(
+    id_producto: int,
+    limite: int = Query(default=100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    _: Usuario = Depends(require_roles(["admin", "gestor"])),
+) -> list[AjusteStockRead]:
+    if db.query(Producto.id_producto).filter(Producto.id_producto == id_producto).first() is None:
+        raise HTTPException(status_code=404, detail="Producto no encontrado.")
+    ajustes = (
+        db.query(AjusteStock)
+        .filter(AjusteStock.id_producto == id_producto)
+        .order_by(AjusteStock.fecha.desc(), AjusteStock.id_ajuste.desc())
+        .limit(limite)
+        .all()
+    )
+    return [ajuste_read(ajuste) for ajuste in ajustes]

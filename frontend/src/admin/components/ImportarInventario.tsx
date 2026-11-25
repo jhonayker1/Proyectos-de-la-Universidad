@@ -2,11 +2,12 @@
 import React from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { AlertTriangle, CheckCircle2, Download, FileSpreadsheet, RefreshCw, Upload } from 'lucide-react'
-import { ApiError, saveBlob } from '@/api/client'
+import { ApiError } from '@/api/client'
 import { importacionApi } from '@/api/endpoints'
 import { keys, useApiMutation, useCategorias } from '@/api/queries'
 import type { IncidenciaImportacion, ModoImportacion, OpcionesImportacion, ResultadoImportacion, SiExiste } from '@/api/types'
 import { Badge, Field, Modal, Pagination, StatBox, Tabs, cx, errorText, useToast } from '@/shared/components/ui'
+import { saveBlob } from '@/shared/lib/downloads'
 
 const POR_PAGINA = 8
 const IGNORAR = ''
@@ -103,10 +104,10 @@ export default function ImportarInventario({ onClose }: { onClose: () => void })
   const descargar = async (que: 'plantilla' | 'reporte') => {
     setDescargando(que); setErrorDescarga(null)
     try {
-      if (que === 'plantilla') saveBlob(await importacionApi.plantilla(), 'plantilla_inventario.xlsx')
+      if (que === 'plantilla') await saveBlob(await importacionApi.plantilla(), 'plantilla_inventario.xlsx')
       else if (resultado?.reporte_id) {
         const base = (archivo?.name ?? 'inventario').replace(/\.[^.]+$/, '')
-        saveBlob(await importacionApi.reporte(resultado.reporte_id), `errores_${base}.xlsx`)
+        await saveBlob(await importacionApi.reporte(resultado.reporte_id), `errores_${base}.xlsx`)
       }
     } catch (e) {
       setErrorDescarga(e)

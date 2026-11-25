@@ -1,11 +1,10 @@
-import csv
 import io
 import json
 import logging
 import re
 
 import pytest
-from openpyxl import Workbook, load_workbook
+from openpyxl import Workbook
 
 from app.core.config import settings
 from app.models import Auditoria, Proveedor
@@ -34,7 +33,7 @@ def cambios(registro: Auditoria) -> dict[str, tuple]:
 def test_producto_crear_modificar_y_eliminar_quedan_registrados(client, db_session, admin):
     r = client.post("/productos/", headers=admin, json={
         "nombre": "Aceite 20W50", "id_categoria": 1, "precio_distribuidor": "10", "precio_usd": "25",
-        "stock_actual": 4,
+        "stock_actual": 0,
     })
     assert r.status_code == 201, r.text
     producto = r.json()
@@ -48,7 +47,9 @@ def test_producto_crear_modificar_y_eliminar_quedan_registrados(client, db_sessi
     assert modificar.accion == "modificar"
     assert modificar.descripcion == f"Producto {producto['sku']} · Aceite 20W50: precio venta USD 25.00 → 30.00; ubicación — → Estante B."
     assert cambios(modificar) == {"precio_usd": ("25.00", "30.00"), "ubicacion": (None, "Estante B")}
-    assert eliminar.accion == "eliminar" and cambios(eliminar)["stock_actual"] == ("4", None)
+    assert eliminar.accion == "eliminar"
+    assert cambios(eliminar)["is_deleted"] == ("No", "Sí")
+    assert cambios(eliminar)["fecha_eliminacion"][0] is None
     assert len({crear.id_operacion, modificar.id_operacion, eliminar.id_operacion}) == 3
 
 
@@ -196,24 +197,20 @@ def test_api_filtra_pagina_y_es_solo_lectura(client, db_session, admin):
     assert client.get(URL, headers=admin, params={"desde": "2026-02-01", "hasta": "2026-01-01"}).status_code == 422
 
 
-def test_exportar_excel_y_csv_queda_registrado(client, db_session, admin):
+def test_exportar_pdf_entrega_datos_y_queda_registrado(client, db_session, admin):
     client.post("/productos/", headers=admin, json={"nombre": "=HYPERLINK(\"x\")", "id_categoria": 1, "precio_usd": "5"})
-    r = client.get(f"{URL}exportar", headers=admin, params={"formato": "xlsx", "modulo": "inventario"})
-    assert r.status_code == 200 and r.headers["content-type"].startswith("application/vnd.openxml")
-    hoja = load_workbook(io.BytesIO(r.content))["Auditoría"]
-    filas = list(hoja.iter_rows(values_only=True))
-    assert filas[0][:5] == ("Fecha", "Usuario", "Rol", "Módulo", "Acción")
-    assert filas[1][3:5] == ("Inventario", "Crear") and "Nombre: — → =HYPERLINK" in filas[1][9]
-    assert hoja["H2"].data_type == "s"  # la referencia empieza con el SKU, pero ningún texto es fórmula
+    r = client.get(f"{URL}exportar", headers=admin, params={"formato": "pdf", "modulo": "inventario"})
+    assert r.status_code == 200 and r.headers["content-type"].startswith("application/json")
+    resultado = r.json()
+    assert resultado["total"] == len(resultado["items"]) == 1
+    assert resultado["items"][0]["modulo_etiqueta"] == "Inventario"
+    assert any(c["etiqueta"] == "Nombre" and c["despues"] == '=HYPERLINK("x")'
+               for c in resultado["items"][0]["cambios"])
+    assert client.get(f"{URL}exportar", headers=admin, params={"formato": "xlsx"}).status_code == 422
 
-    r = client.get(f"{URL}exportar", headers=admin, params={"formato": "csv", "modulo": "inventario"})
-    texto = r.content.decode("utf-8")
-    assert texto.startswith("﻿")
-    filas = list(csv.reader(io.StringIO(texto.lstrip("﻿")), delimiter=";"))
-    assert filas[0][0] == "Fecha" and len(filas) == 2
     exportes = registros(db_session, modulo="auditoria", accion="exportar")
-    assert [e.referencia.rsplit(".", 1)[1] for e in exportes] == ["xlsx", "csv"]
-    assert "1 registro(s) (modulo=inventario)" in exportes[0].descripcion
+    assert [e.referencia.rsplit(".", 1)[1] for e in exportes] == ["pdf"]
+    assert "PDF: 1 registro(s) (modulo=inventario)" in exportes[0].descripcion
 
 
 def test_solo_el_administrador_ve_la_auditoria(client, db_session):

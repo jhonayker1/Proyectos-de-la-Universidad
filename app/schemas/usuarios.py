@@ -3,7 +3,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
-RolKey = Literal["admin", "cashier"]
+RolKey = Literal["admin", "cashier", "gestor"]
 
 
 def check_bcrypt_length(password: str) -> str:
@@ -69,6 +69,8 @@ class UsuarioRead(BaseModel):
     permisos: str | None = None
     estado: int
     fecha_creacion: datetime | None
+    is_deleted: bool = False
+    fecha_eliminacion: datetime | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

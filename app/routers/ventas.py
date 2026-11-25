@@ -63,7 +63,7 @@ def lock_products(db: Session, ids: list[int]) -> dict[int, Producto]:
     # Bloqueo en orden de id para evitar interbloqueos entre ventas simultáneas.
     productos = (
         db.query(Producto)
-        .filter(Producto.id_producto.in_(ids))
+        .filter(Producto.id_producto.in_(ids), Producto.is_deleted.is_(False))
         .order_by(Producto.id_producto)
         .with_for_update(of=Producto)
         .all()
@@ -186,7 +186,7 @@ def list_sales(
     hasta: date | None = Query(default=None, description="Fin del rango (incluido)."),
     limite: int = Query(default=100, ge=1, le=5000),
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(require_roles(["admin", "cashier"])),
+    current_user: Usuario = Depends(require_roles(["admin", "gestor", "cashier"])),
 ) -> list[VentaRead]:
     query = db.query(Venta)
     if current_user.rol == "cashier":
@@ -202,7 +202,7 @@ def list_sales(
 def my_daily_summary(
     dia: date = Query(default_factory=local_today),
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(require_roles(["admin", "cashier"])),
+    current_user: Usuario = Depends(require_roles(["admin", "gestor", "cashier"])),
 ) -> ResumenVentas:
     """Corte diario de las ventas registradas por el usuario autenticado."""
     return build_summary(db, dia, current_user.id_usuario)
@@ -212,7 +212,7 @@ def my_daily_summary(
 def get_sale(
     id_venta: int,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(require_roles(["admin", "cashier"])),
+    current_user: Usuario = Depends(require_roles(["admin", "gestor", "cashier"])),
 ) -> VentaRead:
     venta = db.query(Venta).filter(Venta.id_venta == id_venta).first()
     if venta is None or (

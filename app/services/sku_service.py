@@ -113,6 +113,11 @@ def siguiente_sku(db: Session, categoria: Categoria) -> str:
     siguiente = ultimo + 1
     while True:
         sku = f"{prefijo}-{siguiente:0{ancho}d}"
-        if db.query(Producto.id_producto).filter(Producto.sku == sku).first() is None:
+        if (
+            db.query(Producto.id_producto)
+            .filter(Producto.sku == sku, Producto.is_deleted.is_(False))
+            .first()
+            is None
+        ):
             return sku
         siguiente += 1

@@ -77,7 +77,7 @@ function CierreTurno({ onClose }: { onClose: () => void }) {
       <QueryState query={resumen}>
         {r => (
           <div className="flex flex-col gap-3">
-            <div className="grid grid-cols-3 gap-2.5">
+            <div className="grid grid-cols-1 gap-2.5 min-[480px]:grid-cols-3">
               <StatBox label="Ventas" value={r.cantidad_ventas} color="#10b981" />
               <StatBox label="Artículos" value={r.articulos_vendidos} color="#4f46e5" />
               <StatBox label="Total USD" value={usd(r.monto_total_usd)} color="#06b6d4" />
@@ -122,7 +122,7 @@ export default function PuntoVenta() {
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
       <div className="flex shrink-0 flex-wrap gap-4">
-        <div className="card flex min-w-[320px] flex-1 flex-col gap-4 px-[22px] py-[18px]">
+        <div className="card flex min-w-0 flex-1 flex-col gap-4 px-4 py-[18px] sm:min-w-[320px] sm:px-[22px]">
           <div className="flex items-center justify-between">
             <h3 className="m-0 text-[15px] font-bold">Panel de cajero</h3>
             <span className="rounded-full bg-success/15 px-3 py-0.5 text-[11px] font-bold text-success">Turno activo</span>
@@ -132,18 +132,18 @@ export default function PuntoVenta() {
               <div className="flex h-[54px] w-[54px] items-center justify-center rounded-full bg-primary font-display text-[22px] font-extrabold text-white">
                 {user.nombre_completo.charAt(0).toUpperCase()}
               </div>
-              <div>
-                <div className="font-display text-base font-bold">{user.nombre_completo}</div>
-                <div className="mt-0.5 text-xs text-muted-foreground">{user.correo}</div>
+              <div className="min-w-0">
+                <div className="break-words font-display text-base font-bold">{user.nombre_completo}</div>
+                <div className="mt-0.5 break-all text-xs text-muted-foreground">{user.correo}</div>
                 <span className="mt-1 inline-block rounded-full bg-primary/10 px-2.5 py-0.5 text-[11px] font-bold text-primary">Cajero</span>
               </div>
             </div>
-            <div className="h-[52px] w-px shrink-0 bg-border" />
-            <div className="flex gap-3">
+            <div className="hidden h-[52px] w-px shrink-0 bg-border sm:block" />
+            <div className="flex flex-wrap gap-3">
               <StatBox className="min-w-[120px] !py-2.5" label="Ventas hoy" value={resumen.data ? usd(resumen.data.monto_total_usd) : '…'} color="var(--primary)" />
               <StatBox className="min-w-[120px] !py-2.5" label="Pedidos procesados" value={resumen.data?.cantidad_ventas ?? '…'} color="#10b981" />
             </div>
-            <div className="h-[52px] w-px shrink-0 bg-border" />
+            <div className="hidden h-[52px] w-px shrink-0 bg-border sm:block" />
             <button className="btn-danger shrink-0" onClick={() => setCierre(true)}><PowerOff size={14} /> Cerrar turno</button>
           </div>
         </div>
@@ -188,8 +188,8 @@ export default function PuntoVenta() {
                 </div>
               </Link>
             ) : (
-              <div className="flex-1 overflow-y-auto">
-                <table className="w-full border-collapse text-[13px]">
+              <div className="flex-1 overflow-auto">
+                <table className="w-full min-w-[560px] border-collapse text-[13px]">
                   <thead><tr className="border-b border-border bg-muted">{['Producto', 'Cant.', 'Precio unit.', 'Subtotal', ''].map(h => <th key={h} className="th !py-2">{h}</th>)}</tr></thead>
                   <tbody>
                     {cart.lineas.map(({ producto: p, cantidad, subtotal }, i) => (
@@ -213,8 +213,8 @@ export default function PuntoVenta() {
               </div>
             )}
           </div>
-          <div className="flex shrink-0 items-center justify-between border-t border-border px-4 py-3.5">
-            <div className="flex items-center gap-7">
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3.5">
+            <div className="flex flex-wrap items-center gap-4 sm:gap-7">
               <div>
                 <div className="label-caps !mb-0">Total USD</div>
                 <div className="font-display text-2xl leading-tight font-extrabold text-primary">{usd(cart.totalUsd)}</div>
